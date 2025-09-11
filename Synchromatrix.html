@@ -394,22 +394,11 @@
         const label = document.createElement("div");
         label.className = "label";
         label.textContent = row.type === "group" ? row.name : "↳ " + row.name;
-        // Normalize person label with bullet prefix
-        label.textContent = row.type === "group" ? row.name : "• " + row.name;
-        const groupNameForRow = row.type === "group" ? row.name : row.group;
-        const gCol = getGroupColorByName(groupNameForRow);
-        const rgb = hexToRgb(gCol);
-        label.style.background = rgba(rgb, 0.1);
-        label.style.borderLeft = "6px solid " + gCol;
-        label.textContent = row.type === "group" ? row.name : "• " + row.name;
         rowDiv.appendChild(label);
 
         hours.forEach(() => {
           const cell = document.createElement("div");
           cell.className = "cell";
-          // Tönung über gesamte Zeile entsprechend Gruppenfarbe
-          const alpha = row.type === "group" ? 0.08 : 0.05;
-          cell.style.background = rgba(rgb, alpha);
           rowDiv.appendChild(cell);
         });
 
@@ -458,24 +447,27 @@
     }
 
     function updateEvent(ev, leftPx, widthPx) {
+
   // Snap to nearest 5 minutes
-  const totalMinutes = Math.round(startHourFloat * 60 / 5) * 5;
+  const snapMinutes = 30;
+  const totalMinutes = Math.round(((leftPx-150) / hourWidth) * 60 / snapMinutes) * snapMinutes;
   const hour = Math.floor(totalMinutes / 60);
   const minute = totalMinutes % 60;
 
-  const durationMinutes = Math.round((widthPx / hourWidth) * 60 / 5) * 5;
+  const durationMinutes = Math.round((widthPx / hourWidth) * 60 / snapMinutes) * snapMinutes;
   const endTotalMinutes = totalMinutes + durationMinutes;
   const endHour = Math.floor(endTotalMinutes / 60);
   const endMinute = endTotalMinutes % 60;
 
+
   const dateStr = ev.start.split("T")[0];
   const newStart = new Date(dateStr + "T00:00");
-  newStart.setHours(hour, minute, 0, 0);
+  newStart.setHours(hour+2, minute, 0, 0); // +2 for timezone offset
   const newEnd = new Date(dateStr + "T00:00");
-  newEnd.setHours(endHour, endMinute, 0, 0);
-
+  newEnd.setHours(endHour+2, endMinute, 0, 0); // +2 for timezone offset
   ev.start = newStart.toISOString().slice(0,16);
   ev.end = newEnd.toISOString().slice(0,16);
+  syncAllEventElements(ev);
 }
 
     function syncAllEventElements(ev) {
@@ -518,15 +510,15 @@
 
   window.addEventListener("mouseup", e => {
     if (isDragging) {
-      isDragging = false;
-      // Use the new left position to update event data
-      const idx = tableData.events.indexOf(ev);
-      const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
-      // Use the left of the first element (they are all the same now)
-      const leftPx = parseFloat(elems[0].style.left);
-      const widthPx = parseFloat(elems[0].style.width);
-      updateEvent(ev, leftPx, widthPx);
-      syncAllEventElements(ev);
+        isDragging = false;
+        // Use the new left position to update event data
+        const idx = tableData.events.indexOf(ev);
+        const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
+        // Use the left of the first element (they are all the same now)
+        const leftPx = parseFloat(elems[0].style.left);
+        const widthPx = parseFloat(elems[0].style.width);
+        updateEvent(ev, leftPx, widthPx);
+        
     }
   });
 }
@@ -545,16 +537,25 @@
       });
     
       window.addEventListener("mousemove", e => {
+
+        
+        
         if (!isResizing) return;
         const dx = e.clientX - startX;
         if (side === "right") {
-          el.style.width = (origWidth + dx) + "px";
+            newLeft = origLeft;
+            newWidth = origWidth + dx;
         } else {
-          el.style.left = (origLeft + dx) + "px";
-          el.style.width = (origWidth - dx) + "px";
+            newLeft = origLeft + dx;
+            newWidth = origWidth - dx;
         }
-        
-        //syncAllEventElements(ev);
+        // Move all event elements visually
+        const idx = tableData.events.indexOf(ev);
+        const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
+        elems.forEach(elm => {
+            elm.style.left = newLeft + "px";
+            elm.style.width = newWidth + "px";
+        });
       });
     
       window.addEventListener("mouseup", e => {
@@ -601,32 +602,6 @@
       a.download = "updated_calendar.json";
       a.click();
       URL.revokeObjectURL(url);
-    });
-
-    // Teilnehmer-Verwaltung Modal: open/close and render
-    const gmModal = document.getElementById("gmModal");
-    const gmClose = document.getElementById("gmModalClose");
-    const gmOpenBtn = document.getElementById("manageBtn");
-
-    function openGmModal() {
-      if (!tableData) return;
-      renderGroupManager();
-      gmModal.classList.add("open");
-      gmModal.setAttribute("aria-hidden", "false");
-    }
-
-    function closeGmModal() {
-      gmModal.classList.remove("open");
-      gmModal.setAttribute("aria-hidden", "true");
-    }
-
-    gmOpenBtn.addEventListener("click", openGmModal);
-    gmClose.addEventListener("click", closeGmModal);
-    gmModal.addEventListener("click", (e) => {
-      if (e.target === gmModal) closeGmModal();
-    });
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && gmModal.classList.contains("open")) closeGmModal();
     });
   </script>
 </body>
