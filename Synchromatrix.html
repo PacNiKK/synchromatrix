@@ -603,6 +603,32 @@
       a.click();
       URL.revokeObjectURL(url);
     });
+
+    // Teilnehmer/Gruppen Modul öffnen/schließen
+    const gmModal = document.getElementById("gmModal");
+    const gmClose = document.getElementById("gmModalClose");
+    const gmOpenBtn = document.getElementById("manageBtn");
+
+    function openGmModal() {
+      if (!tableData) return;
+      renderGroupManager();
+      gmModal.classList.add("open");
+      gmModal.setAttribute("aria-hidden", "false");
+    }
+
+    function closeGmModal() {
+      gmModal.classList.remove("open");
+      gmModal.setAttribute("aria-hidden", "true");
+    }
+
+    if (gmOpenBtn) gmOpenBtn.addEventListener("click", openGmModal);
+    if (gmClose) gmClose.addEventListener("click", closeGmModal);
+    if (gmModal) gmModal.addEventListener("click", (e) => {
+      if (e.target === gmModal) closeGmModal();
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && gmModal.classList.contains("open")) closeGmModal();
+    });
   </script>
 </body>
 </html>
