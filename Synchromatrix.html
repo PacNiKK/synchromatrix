@@ -97,6 +97,14 @@
     .ev-dt .ev-block { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #eee; border-radius: 8px; background: #fafafa; }
     .ev-dt .ev-head { font-weight: 600; min-width: 70px; color: #333; }
     .ev-dt input[type="date"], .ev-dt input[type="time"] { padding: 4px 6px; }
+    /* No-attendees list */
+    .na-list { display: grid; grid-template-columns: 1fr 140px 140px auto; gap: 8px 12px; align-items: center; }
+    .na-head { font-weight: 600; color: #444; }
+    .na-pill { display: inline-block; width: 12px; height: 12px; border-radius: 999px; border: 1px solid #ccc; margin-right: 6px; vertical-align: middle; }
+    .na-row { display: contents; }
+    /* Top actions layout */
+    .actions-row { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+    .mgmt-row { margin: 10px 0 0; }
   </style>
 </head>
 <body>
@@ -106,9 +114,12 @@
     <input type="file" id="fileInput" accept=".json">
     <button id="downloadBtn" disabled>Download Updated JSON</button>
   </p>
-  <p>
-    <button id="manageBtn" disabled>Teilnehmer und Gruppenverwaltung</button>
+  <p class="actions-row">
     <button id="newEventBtn" disabled>Neuer Termin</button>
+    <button id="noAttBtn" disabled>Termine ohne Teilnehmer</button>
+  </p>
+  <p class="mgmt-row">
+    <button id="manageBtn" disabled>Teilnehmer und Gruppenverwaltung</button>
   </p>
   <p>
     Zoom: <input type="range" id="zoomSlider" min="30" max="200" value="60">
@@ -131,6 +142,16 @@
         <button id="evModalClose" aria-label="Schließen">×</button>
       </header>
       <div id="evModalBody" class="body"></div>
+    </div>
+  </div>
+  <!-- Termine ohne Teilnehmer Modal -->
+  <div id="naModal" class="modal" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="naModalTitle">
+      <header>
+        <h3 id="naModalTitle">Termine ohne Teilnehmer</h3>
+        <button id="naModalClose" aria-label="Schließen">×</button>
+      </header>
+      <div id="naModalBody" class="body"></div>
     </div>
   </div>
   <div id="calendarWrapper">
@@ -216,6 +237,7 @@
         const color = GROUP_COLOR_PALETTE[idx % GROUP_COLOR_PALETTE.length];
         tableData.groups.push({ name: n, people: [], color });
         loadCalendar(tableData);
+        updateNoAttCount();
         renderGroupManager();
       }
 
@@ -237,6 +259,7 @@
         // Entferne Gruppe
         tableData.groups = tableData.groups.filter(gr => gr.name !== name);
         loadCalendar(tableData);
+        updateNoAttCount();
         renderGroupManager();
       }
 
@@ -249,6 +272,7 @@
         if (!Array.isArray(g.people)) g.people = [];
         g.people.push(n);
         loadCalendar(tableData);
+        updateNoAttCount();
         renderGroupManager();
       }
 
@@ -262,6 +286,7 @@
         if (dst.people.includes(name)) { alert("Zielgruppe enthält den Namen bereits."); return; }
         dst.people.push(name);
         loadCalendar(tableData);
+        updateNoAttCount();
         renderGroupManager();
       }
 
@@ -371,6 +396,8 @@
         listWrap.innerHTML = "";
 
         tableData.groups.forEach(g => {
+          // Blende 'Ungruppiert' aus, wenn leer
+          if ((g.name === 'Ungruppiert') && (!g.people || g.people.length === 0)) return;
           const term = (gmSearchTerm || "").toLowerCase();
           const peopleList = (g.people || []);
           const peopleFiltered = term ? peopleList.filter(p => p.toLowerCase().includes(term)) : peopleList;
@@ -633,6 +660,7 @@
       function getRows() {
         const rows = [];
         data.groups.forEach(g => {
+          if (g.name === 'Ungruppiert' && (!g.people || g.people.length === 0)) return;
           rows.push({ type: "group", name: g.name });
           if (!collapsedGroups.has(g.name)) {
             g.people.forEach(p => rows.push({ type: "person", name: p, group: g.name }));
@@ -879,6 +907,9 @@
           document.getElementById("manageBtn").disabled = false;
           const neb = document.getElementById("newEventBtn");
           if (neb) neb.disabled = false;
+          const nab = document.getElementById("noAttBtn");
+          if (nab) nab.disabled = false;
+          updateNoAttCount();
         } catch (err) {
           document.getElementById("calendar").textContent =
             "Invalid JSON file: " + err;
@@ -937,6 +968,17 @@
     const evClose = document.getElementById("evModalClose");
     const evBody = document.getElementById("evModalBody");
     const newEventBtn = document.getElementById("newEventBtn");
+    const naModal = document.getElementById("naModal");
+    const naClose = document.getElementById("naModalClose");
+    const naBody = document.getElementById("naModalBody");
+    const noAttBtn = document.getElementById("noAttBtn");
+
+    function updateNoAttCount() {
+      const btn = document.getElementById("noAttBtn");
+      if (!btn || !tableData) return;
+      const cnt = (tableData.events || []).filter(ev => !(Array.isArray(ev.attendees) && ev.attendees.length > 0)).length;
+      btn.textContent = `Termine ohne Teilnehmer (${cnt})`;
+    }
 
     function openEvModal(eventIndex = -1) {
       renderEventEditor(eventIndex);
@@ -946,10 +988,63 @@
     function closeEvModal() {
       evModal.classList.remove("open");
       evModal.setAttribute("aria-hidden", "true");
+      // Wenn Liste der Termine ohne Teilnehmer offen ist, aktualisieren
+      if (naModal && naModal.classList.contains("open")) renderNoAttList();
+      updateNoAttCount();
     }
     if (evClose) evClose.addEventListener("click", closeEvModal);
     if (evModal) evModal.addEventListener("click", (e) => { if (e.target === evModal) closeEvModal(); });
     if (newEventBtn) newEventBtn.addEventListener("click", () => openEvModal(-1));
+
+    // ---- Termine ohne Teilnehmer (Liste) ----
+    function openNaModal() {
+      renderNoAttList();
+      naModal.classList.add("open");
+      naModal.setAttribute("aria-hidden", "false");
+    }
+    function closeNaModal() {
+      naModal.classList.remove("open");
+      naModal.setAttribute("aria-hidden", "true");
+    }
+    function renderNoAttList() {
+      naBody.innerHTML = "";
+      const list = document.createElement("div");
+      list.className = "na-list";
+      // Header
+      const hTitle = document.createElement("div"); hTitle.className = "na-head"; hTitle.textContent = "Titel";
+      const hStart = document.createElement("div"); hStart.className = "na-head"; hStart.textContent = "Start";
+      const hEnd = document.createElement("div"); hEnd.className = "na-head"; hEnd.textContent = "Ende";
+      const hAct = document.createElement("div"); hAct.className = "na-head"; hAct.textContent = "Aktionen";
+      list.appendChild(hTitle); list.appendChild(hStart); list.appendChild(hEnd); list.appendChild(hAct);
+
+      let count = 0;
+      (tableData?.events || []).forEach((ev, idx) => {
+        const atts = ev.attendees;
+        if (Array.isArray(atts) && atts.length > 0) return;
+        // row container (display: contents)
+        const row = document.createElement("div"); row.className = "na-row";
+        const t = document.createElement("div");
+        const pill = document.createElement("span"); pill.className = "na-pill"; pill.style.background = ev.color || "#9e9e9e";
+        t.appendChild(pill);
+        t.appendChild(document.createTextNode((ev.title||"(ohne Titel)")));
+        const s = document.createElement("div"); s.textContent = ev.start || "";
+        const e = document.createElement("div"); e.textContent = ev.end || "";
+        const acts = document.createElement("div");
+        const edit = document.createElement("button"); edit.textContent = "Bearbeiten"; edit.addEventListener("click", () => { closeNaModal(); openEvModal(idx); });
+        const del = document.createElement("button"); del.textContent = "Löschen"; del.addEventListener("click", () => { if (confirm("Termin wirklich löschen?")) { tableData.events.splice(idx,1); loadCalendar(tableData); renderNoAttList(); updateNoAttCount(); }});
+        acts.appendChild(edit); acts.appendChild(del);
+        list.appendChild(t); list.appendChild(s); list.appendChild(e); list.appendChild(acts);
+        count++;
+      });
+      if (count === 0) {
+        const empty = document.createElement("div"); empty.style.gridColumn = "1 / -1"; empty.style.color = "#666"; empty.textContent = "Keine Termine ohne Teilnehmer gefunden.";
+        list.appendChild(empty);
+      }
+      naBody.appendChild(list);
+    }
+    if (noAttBtn) noAttBtn.addEventListener("click", openNaModal);
+    if (naClose) naClose.addEventListener("click", closeNaModal);
+    if (naModal) naModal.addEventListener("click", (e) => { if (e.target === naModal) closeNaModal(); });
 
     function renderEventEditor(eventIndex) {
       const isNew = eventIndex === -1;
@@ -1067,6 +1162,7 @@
         if (confirm("Termin wirklich löschen?")) {
           tableData.events.splice(eventIndex, 1);
           loadCalendar(tableData);
+          updateNoAttCount();
           closeEvModal();
         }
       });
@@ -1094,10 +1190,11 @@
           notes: (notes.value||""),
           location: (locationInput.value||"").trim()
         };
-        if (isNew) tableData.events.push(newEv); else tableData.events[eventIndex] = newEv;
-        loadCalendar(tableData);
-        closeEvModal();
-      });
+      if (isNew) tableData.events.push(newEv); else tableData.events[eventIndex] = newEv;
+      loadCalendar(tableData);
+      updateNoAttCount();
+      closeEvModal();
+    });
 
       evBody.appendChild(form);
     }
