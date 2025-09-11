@@ -12,7 +12,7 @@
     }
     .timeline {
       display: grid;
-      grid-template-columns: 150px repeat(24, var(--hour-width, 60px));
+      grid-template-columns: 150px repeat(calc(var(--numDays,1)*24), var(--hour-width, 60px));
       min-width: calc(150px + 24 * var(--hour-width, 60px));
       border-bottom: 1px solid #ccc;
       position: relative;
@@ -25,7 +25,7 @@
     }
     .label {
       border-right: 1px solid #ccc;
-      padding: 2px;
+      padding: 4px;
       background: #f0f0f0;
     }
     .cell {
@@ -359,9 +359,14 @@
     function loadCalendar(data) {
       const container = document.getElementById("calendar");
       container.innerHTML = "";
+      let startDate = data.startDate ? new Date(data.startDate) : new Date();
+      let endDate = data.endDate ? new Date(data.endDate) : new Date();
+      const numDays = endDate.getDate() - startDate.getDate() + 1;
       container.style.setProperty("--hour-width", hourWidth + "px");
+      container.style.setProperty("--numDays", (data.endDate && data.startDate) ? ((new Date(data.endDate).getDate() - new Date(data.startDate).getDate() + 1)) : 1);
+      // Read start and end date from JSON
 
-      const hours = [...Array(24).keys()];
+      const hours = [...Array(numDays*24).keys()];
 
       // Header row
       const header = document.createElement("div");
@@ -370,7 +375,7 @@
       hours.forEach(h => {
         const div = document.createElement("div");
         div.className = "header";
-        div.textContent = h.toString().padStart(2, "0") + ":00";
+        div.textContent = (h%24).toString().padStart(2, "0") + ":00";
         header.appendChild(div);
       });
       container.appendChild(header);
@@ -431,7 +436,7 @@
           eventDiv.className = "event";
           eventDiv.style.background = ev.color;
           eventDiv.style.left = (150 + startHour * hourWidth) + "px";
-          eventDiv.style.width = ((endHour - startHour) * hourWidth) + "px";
+          eventDiv.style.width = (((endHour - startHour) * hourWidth) - 8 ) + "px"; // -8 for resize handles
           eventDiv.textContent = ev.title;
 
           // Link the element to the event
@@ -472,9 +477,11 @@
 
   const dateStr = ev.start.split("T")[0];
   const newStart = new Date(dateStr + "T00:00");
-  newStart.setHours(hour+2, minute, 0, 0); // +2 for timezone offset
+  newStart.setDate(newStart.getDate()+hour/24);
+  newStart.setHours(hour+tableData.timezone, minute, 0, 0); // +2 for timezone offset
   const newEnd = new Date(dateStr + "T00:00");
-  newEnd.setHours(endHour+2, endMinute, 0, 0); // +2 for timezone offset
+  newEnd.setDate(newEnd.getDate()+(hour+endHour)/24);
+  newEnd.setHours(endHour%24+tableData.timezone, endMinute, 0, 0); // +2 for timezone offset
   ev.start = newStart.toISOString().slice(0,16);
   ev.end = newEnd.toISOString().slice(0,16);
   syncAllEventElements(ev);
@@ -489,7 +496,7 @@
       const endHour = end.getHours() + end.getMinutes() / 60;
       elems.forEach(el => {
         el.style.left = (150 + startHour * hourWidth) + "px";
-        el.style.width = ((endHour - startHour) * hourWidth) + "px";
+        el.style.width = (((endHour - startHour) * hourWidth)-8) + "px"; // -8 for resize handles
       });
     }
 
