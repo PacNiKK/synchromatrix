@@ -56,6 +56,21 @@
     }
     .resize-handle.left { left: 0; }
     .resize-handle.right { right: 0; }
+
+    /* Modal styles for Teilnehmer-Verwaltung */
+    .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); z-index: 1000; }
+    .modal.open { display: flex; }
+    .modal .dialog { background: #fff; width: min(900px, 95vw); max-height: 90vh; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden; }
+    .modal .dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #eee; background: #fafafa; }
+    .modal .dialog header h3 { margin: 0; font-size: 16px; }
+    .modal .dialog header button { border: none; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px; }
+    .modal .dialog .body { padding: 12px 16px; overflow: auto; }
+    .gm-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .gm-section { padding: 6px 0; border-top: 1px solid #eee; }
+    .gm-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+    .gm-name { min-width: 160px; }
+    .gm-header { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 6px; }
+    .gm-header .gm-actions { display: flex; gap: 6px; }
   </style>
 </head>
 <body>
@@ -64,10 +79,21 @@
     <label for="fileInput">Select JSON file:</label>
     <input type="file" id="fileInput" accept=".json">
     <button id="downloadBtn" disabled>Download Updated JSON</button>
+    <button id="manageBtn" disabled>Teilnehmer und Gruppenverwaltung</button>
   </p>
   <p>
     Zoom: <input type="range" id="zoomSlider" min="30" max="200" value="60">
   </p>
+  <!-- Teilnehmer-Verwaltung Modal -->
+  <div id="gmModal" class="modal" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="gmModalTitle">
+      <header>
+        <h3 id="gmModalTitle">Teilnehmer-Verwaltung</h3>
+        <button id="gmModalClose" aria-label="Schließen">×</button>
+      </header>
+      <div id="gmModalBody" class="body"></div>
+    </div>
+  </div>
   <div id="calendarWrapper">
     <div id="calendar"></div>
   </div>
@@ -75,6 +101,260 @@
   <script>
     let tableData;
     let hourWidth = 60; // px per hour
+
+    // ---- Farben für Gruppen ----
+    const GROUP_COLOR_PALETTE = [
+      "#64b5f6", "#81c784", "#ffd54f", "#ba68c8",
+      "#4db6ac", "#ff8a65", "#90a4ae", "#e57373"
+    ];
+    function hexToRgb(hex) {
+      if (!hex) return { r: 153, g: 153, b: 153 };
+      let h = hex.replace('#','').trim();
+      if (h.length === 3) h = h.split('').map(c => c + c).join('');
+      const int = parseInt(h, 16);
+      return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+    }
+    function rgba(rgb, a) {
+      const { r, g, b } = rgb || { r: 153, g: 153, b: 153 };
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    function findGroupByName(name) {
+      return (tableData?.groups || []).find(g => g.name === name);
+    }
+    function ensureGroupColor(g, idx = 0) {
+      if (!g) return '#999999';
+      if (!g.color) {
+        // deterministisch: Verwende Index in Liste für Farbwahl
+        const i = Math.max(0, (idx || tableData.groups.indexOf(g))) % GROUP_COLOR_PALETTE.length;
+        g.color = GROUP_COLOR_PALETTE[i];
+      }
+      return g.color;
+    }
+    function getGroupColorByName(name) {
+      if (name === 'Ungruppiert') return '#9e9e9e';
+      const g = findGroupByName(name);
+      return ensureGroupColor(g);
+    }
+
+    // ---- Teilnehmer-Verwaltung (Gruppen & Personen) ----
+    function renderGroupManager() {
+      const gm = document.getElementById("gmModalBody");
+      if (!tableData || !Array.isArray(tableData.groups)) {
+        gm.innerHTML = "";
+        return;
+      }
+
+      // Helpers
+      const groupNames = () => tableData.groups.map(g => g.name);
+      const findGroup = (name) => tableData.groups.find(g => g.name === name);
+      const personExists = (name) => tableData.groups.some(g => (g.people||[]).includes(name));
+
+      const groupExists = (name) => {
+        if (!name) return false;
+        const n = String(name).trim().toLowerCase();
+        return groupNames().some(g => g.toLowerCase() === n);
+      };
+
+      function ensureUngrouped() {
+        let u = findGroup("Ungruppiert");
+        if (!u) {
+          u = { name: "Ungruppiert", people: [] };
+          tableData.groups.push(u);
+        }
+        if (!Array.isArray(u.people)) u.people = [];
+        return u;
+      }
+
+      function addGroup(name) {
+        const n = (name || "").trim();
+        if (!n) { alert("Gruppenname darf nicht leer sein."); return; }
+        if (groupExists(n)) { alert("Gruppe existiert bereits."); return; }
+        const idx = tableData.groups.length;
+        const color = GROUP_COLOR_PALETTE[idx % GROUP_COLOR_PALETTE.length];
+        tableData.groups.push({ name: n, people: [], color });
+        loadCalendar(tableData);
+        renderGroupManager();
+      }
+
+      function deleteGroup(name) {
+        if (name === "Ungruppiert") { alert("Die Gruppe 'Ungruppiert' kann nicht gelöscht werden."); return; }
+        const g = findGroup(name);
+        if (!g) return;
+        if (!confirm(`Gruppe "${name}" löschen? Mitglieder werden nach 'Ungruppiert' verschoben.`)) return;
+        const fallback = ensureUngrouped();
+        (g.people || []).forEach(p => {
+          if (!fallback.people.includes(p)) fallback.people.push(p);
+        });
+        // Entferne Gruppenname aus allen Events
+        (tableData.events || []).forEach(ev => {
+          if (Array.isArray(ev.attendees)) {
+            ev.attendees = ev.attendees.filter(a => a !== name);
+          }
+        });
+        // Entferne Gruppe
+        tableData.groups = tableData.groups.filter(gr => gr.name !== name);
+        loadCalendar(tableData);
+        renderGroupManager();
+      }
+
+      function addPersonToGroup(name, groupName) {
+        const n = (name || "").trim();
+        if (!n) { alert("Name darf nicht leer sein."); return; }
+        if (!groupNames().includes(groupName)) { alert("Gruppe nicht gefunden."); return; }
+        if (personExists(n)) { alert("Teilnehmername bereits vorhanden."); return; }
+        const g = findGroup(groupName);
+        if (!Array.isArray(g.people)) g.people = [];
+        g.people.push(n);
+        loadCalendar(tableData);
+        renderGroupManager();
+      }
+
+      function movePerson(name, fromGroup, toGroup) {
+        if (fromGroup === toGroup) return;
+        const src = findGroup(fromGroup);
+        const dst = findGroup(toGroup);
+        if (!src || !dst) return;
+        src.people = (src.people||[]).filter(p => p !== name);
+        if (!Array.isArray(dst.people)) dst.people = [];
+        if (dst.people.includes(name)) { alert("Zielgruppe enthält den Namen bereits."); return; }
+        dst.people.push(name);
+        loadCalendar(tableData);
+        renderGroupManager();
+      }
+
+      function deletePerson(name) {
+        // Entferne aus allen Gruppen
+        tableData.groups.forEach(g => {
+          g.people = (g.people||[]).filter(p => p !== name);
+        });
+        // Entferne aus allen Events
+        (tableData.events||[]).forEach(ev => {
+          if (Array.isArray(ev.attendees)) {
+            ev.attendees = ev.attendees.filter(a => a !== name);
+          }
+        });
+        loadCalendar(tableData);
+        renderGroupManager();
+      }
+
+      // Aufbau UI
+      gm.innerHTML = "";
+
+      const addWrap = document.createElement("div");
+      addWrap.className = "gm-toolbar";
+
+      const groupSelect = document.createElement("select");
+      groupSelect.id = "gmAddGroup";
+      groupNames().forEach(n => {
+        const opt = document.createElement("option");
+        opt.value = opt.textContent = n;
+        groupSelect.appendChild(opt);
+      });
+
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.placeholder = "Name des Teilnehmers";
+      nameInput.id = "gmAddName";
+
+      const addBtn = document.createElement("button");
+      addBtn.textContent = "Hinzufügen";
+      addBtn.addEventListener("click", () => addPersonToGroup(nameInput.value, groupSelect.value));
+      addBtn.textContent = "Hinzufügen";
+
+      addWrap.appendChild(groupSelect);
+      addWrap.appendChild(nameInput);
+      addWrap.appendChild(addBtn);
+
+      // Gruppe hinzufügen
+      const gNameInput = document.createElement("input");
+      gNameInput.type = "text";
+      gNameInput.placeholder = "Gruppenname";
+      gNameInput.id = "gmGroupName";
+
+      const gAddBtn = document.createElement("button");
+      gAddBtn.textContent = "Gruppe hinzufügen";
+      gAddBtn.addEventListener("click", () => addGroup(gNameInput.value));
+
+      addWrap.appendChild(gNameInput);
+      addWrap.appendChild(gAddBtn);
+
+      gm.appendChild(addWrap);
+
+      const listWrap = document.createElement("div");
+      listWrap.style.marginTop = "10px";
+
+      tableData.groups.forEach(g => {
+        const section = document.createElement("div");
+        section.style.padding = "6px 0";
+        section.style.borderTop = "1px solid #eee";
+
+        const header = document.createElement("div");
+        header.style.fontWeight = "bold";
+        header.textContent = `${g.name} (${(g.people||[]).length})`;
+        section.appendChild(header);
+        // Header-Aktionen (Gruppe löschen)
+        header.style.display = "flex";
+        header.style.alignItems = "center";
+        header.style.justifyContent = "space-between";
+        const hActions = document.createElement("div");
+        // Farbwähler
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = ensureGroupColor(g);
+        colorInput.title = "Gruppenfarbe";
+        colorInput.addEventListener("input", () => {
+          g.color = colorInput.value;
+          loadCalendar(tableData);
+          renderGroupManager();
+        });
+        hActions.appendChild(colorInput);
+        if (g.name !== "Ungruppiert") {
+          const delGroupBtn = document.createElement("button");
+          delGroupBtn.textContent = "Gruppe löschen";
+          delGroupBtn.addEventListener("click", () => deleteGroup(g.name));
+          hActions.appendChild(delGroupBtn);
+        }
+        header.appendChild(hActions);
+
+        (g.people||[]).forEach(p => {
+          const row = document.createElement("div");
+          row.style.display = "flex";
+          row.style.alignItems = "center";
+          row.style.gap = "8px";
+          row.style.padding = "2px 0";
+
+          const name = document.createElement("span");
+          name.textContent = p;
+          name.style.minWidth = "160px";
+
+          const moveSel = document.createElement("select");
+          groupNames().forEach(n => {
+            const opt = document.createElement("option");
+            opt.value = opt.textContent = n;
+            if (n === g.name) opt.selected = true;
+            moveSel.appendChild(opt);
+          });
+          moveSel.addEventListener("change", () => movePerson(p, g.name, moveSel.value));
+
+          const delBtn = document.createElement("button");
+          delBtn.textContent = "Löschen";
+          delBtn.textContent = "Löschen";
+          delBtn.addEventListener("click", () => {
+            if (confirm(`\"${p}\" wirklich löschen?`)) deletePerson(p);
+          });
+
+          delBtn.textContent = "Löschen";
+          row.appendChild(name);
+          row.appendChild(moveSel);
+          row.appendChild(delBtn);
+          section.appendChild(row);
+        });
+
+        listWrap.appendChild(section);
+      });
+
+      gm.appendChild(listWrap);
+    }
 
     function loadCalendar(data) {
       const container = document.getElementById("calendar");
@@ -114,11 +394,22 @@
         const label = document.createElement("div");
         label.className = "label";
         label.textContent = row.type === "group" ? row.name : "↳ " + row.name;
+        // Normalize person label with bullet prefix
+        label.textContent = row.type === "group" ? row.name : "• " + row.name;
+        const groupNameForRow = row.type === "group" ? row.name : row.group;
+        const gCol = getGroupColorByName(groupNameForRow);
+        const rgb = hexToRgb(gCol);
+        label.style.background = rgba(rgb, 0.1);
+        label.style.borderLeft = "6px solid " + gCol;
+        label.textContent = row.type === "group" ? row.name : "• " + row.name;
         rowDiv.appendChild(label);
 
         hours.forEach(() => {
           const cell = document.createElement("div");
           cell.className = "cell";
+          // Tönung über gesamte Zeile entsprechend Gruppenfarbe
+          const alpha = row.type === "group" ? 0.08 : 0.05;
+          cell.style.background = rgba(rgb, alpha);
           rowDiv.appendChild(cell);
         });
 
@@ -271,7 +562,6 @@
           isResizing = false;
           updateEvent(ev, parseFloat(el.style.left), parseFloat(el.style.width));
           syncAllEventElements(ev);
-          alert("Test");
         }
       });
     }
@@ -287,6 +577,7 @@
           tableData = JSON.parse(evt.target.result);
           loadCalendar(tableData);
           document.getElementById("downloadBtn").disabled = false;
+          document.getElementById("manageBtn").disabled = false;
         } catch (err) {
           document.getElementById("calendar").textContent =
             "Invalid JSON file: " + err;
@@ -310,6 +601,32 @@
       a.download = "updated_calendar.json";
       a.click();
       URL.revokeObjectURL(url);
+    });
+
+    // Teilnehmer-Verwaltung Modal: open/close and render
+    const gmModal = document.getElementById("gmModal");
+    const gmClose = document.getElementById("gmModalClose");
+    const gmOpenBtn = document.getElementById("manageBtn");
+
+    function openGmModal() {
+      if (!tableData) return;
+      renderGroupManager();
+      gmModal.classList.add("open");
+      gmModal.setAttribute("aria-hidden", "false");
+    }
+
+    function closeGmModal() {
+      gmModal.classList.remove("open");
+      gmModal.setAttribute("aria-hidden", "true");
+    }
+
+    gmOpenBtn.addEventListener("click", openGmModal);
+    gmClose.addEventListener("click", closeGmModal);
+    gmModal.addEventListener("click", (e) => {
+      if (e.target === gmModal) closeGmModal();
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && gmModal.classList.contains("open")) closeGmModal();
     });
   </script>
 </body>
