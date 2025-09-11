@@ -393,12 +393,22 @@
 
         const label = document.createElement("div");
         label.className = "label";
-        label.textContent = row.type === "group" ? row.name : "↳ " + row.name;
+        // Normalize person label with bullet prefix
+        label.textContent = row.type === "group" ? row.name : "• " + row.name;
+        const groupNameForRow = row.type === "group" ? row.name : row.group;
+        const gCol = getGroupColorByName(groupNameForRow);
+        const rgb = hexToRgb(gCol);
+        label.style.background = rgba(rgb, 0.1);
+        label.style.borderLeft = "6px solid " + gCol;
+        label.textContent = row.type === "group" ? row.name : "• " + row.name;
         rowDiv.appendChild(label);
 
         hours.forEach(() => {
           const cell = document.createElement("div");
           cell.className = "cell";
+          // Tönung über gesamte Zeile entsprechend Gruppenfarbe
+          const alpha = row.type === "group" ? 0.08 : 0.05;
+          cell.style.background = rgba(rgb, alpha);
           rowDiv.appendChild(cell);
         });
 
