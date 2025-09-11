@@ -28,6 +28,7 @@
       padding: 2px;
       background: #f0f0f0;
     }
+    .label.group { cursor: pointer; user-select: none; }
     .cell {
       border: 1px solid #eee;
       height: 40px;
@@ -71,6 +72,11 @@
     .gm-name { min-width: 160px; }
     .gm-header { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 6px; }
     .gm-header .gm-actions { display: flex; gap: 6px; }
+    /* Event editor */
+    .ev-dt { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; grid-column: 1 / span 2; }
+    .ev-dt .ev-block { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #eee; border-radius: 8px; background: #fafafa; }
+    .ev-dt .ev-head { font-weight: 600; min-width: 70px; color: #333; }
+    .ev-dt input[type="date"], .ev-dt input[type="time"] { padding: 4px 6px; }
   </style>
 </head>
 <body>
@@ -79,7 +85,10 @@
     <label for="fileInput">Select JSON file:</label>
     <input type="file" id="fileInput" accept=".json">
     <button id="downloadBtn" disabled>Download Updated JSON</button>
+  </p>
+  <p>
     <button id="manageBtn" disabled>Teilnehmer und Gruppenverwaltung</button>
+    <button id="newEventBtn" disabled>Neuer Termin</button>
   </p>
   <p>
     Zoom: <input type="range" id="zoomSlider" min="30" max="200" value="60">
@@ -94,6 +103,16 @@
       <div id="gmModalBody" class="body"></div>
     </div>
   </div>
+  <!-- Termin-Editor Modal -->
+  <div id="evModal" class="modal" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="evModalTitle">
+      <header>
+        <h3 id="evModalTitle">Termin</h3>
+        <button id="evModalClose" aria-label="Schließen">×</button>
+      </header>
+      <div id="evModalBody" class="body"></div>
+    </div>
+  </div>
   <div id="calendarWrapper">
     <div id="calendar"></div>
   </div>
@@ -101,6 +120,7 @@
   <script>
     let tableData;
     let hourWidth = 60; // px per hour
+    let collapsedGroups = new Set();
 
     // ---- Farben für Gruppen ----
     const GROUP_COLOR_PALETTE = [
@@ -362,6 +382,9 @@
       container.style.setProperty("--hour-width", hourWidth + "px");
 
       const hours = [...Array(24).keys()];
+      const viewDateStr = data.date || new Date().toISOString().slice(0,10);
+      const dayStart = new Date(viewDateStr + "T00:00");
+      const dayEnd = new Date(viewDateStr + "T24:00");
 
       // Header row
       const header = document.createElement("div");
@@ -380,7 +403,9 @@
         const rows = [];
         data.groups.forEach(g => {
           rows.push({ type: "group", name: g.name });
-          g.people.forEach(p => rows.push({ type: "person", name: p, group: g.name }));
+          if (!collapsedGroups.has(g.name)) {
+            g.people.forEach(p => rows.push({ type: "person", name: p, group: g.name }));
+          }
         });
         return rows;
       }
@@ -392,7 +417,7 @@
         rowDiv.className = "timeline";
 
         const label = document.createElement("div");
-        label.className = "label";
+        label.className = row.type === "group" ? "label group" : "label";
         // Normalize person label with bullet prefix
         label.textContent = row.type === "group" ? row.name : "• " + row.name;
         const groupNameForRow = row.type === "group" ? row.name : row.group;
@@ -402,6 +427,18 @@
         label.style.borderLeft = "6px solid " + gCol;
         label.textContent = row.type === "group" ? row.name : "• " + row.name;
         rowDiv.appendChild(label);
+        // Apply collapsible behavior and final text
+        if (row.type === "group") {
+          const isCollapsed = collapsedGroups.has(row.name);
+          const caret = isCollapsed ? "▶" : "▼";
+          label.textContent = `${caret} ${row.name}`;
+          label.addEventListener('click', () => {
+            if (collapsedGroups.has(row.name)) collapsedGroups.delete(row.name); else collapsedGroups.add(row.name);
+            loadCalendar(tableData);
+          });
+        } else {
+          label.textContent = "• " + row.name;
+        }
 
         hours.forEach(() => {
           const cell = document.createElement("div");
@@ -422,23 +459,43 @@
             (row.type === "person" && attendees.includes(row.name));
           if (!match) return;
 
-          const start = new Date(ev.start);
-          const end = new Date(ev.end);
-          const startHour = start.getHours() + start.getMinutes() / 60;
-          const endHour = end.getHours() + end.getMinutes() / 60;
+          // Clip multi-day events to the current view day
+          const evStart = new Date(ev.start);
+          const evEnd = new Date(ev.end);
+          const clipStart = new Date(Math.max(evStart.getTime(), dayStart.getTime()));
+          const clipEnd = new Date(Math.min(evEnd.getTime(), dayEnd.getTime()));
+          if (clipEnd <= clipStart) return; // no overlap with this day
+          const startHour = clipStart.getHours() + clipStart.getMinutes() / 60;
+          const endHour = clipEnd.getHours() + clipEnd.getMinutes() / 60;
 
           const eventDiv = document.createElement("div");
           eventDiv.className = "event";
           eventDiv.style.background = ev.color;
           eventDiv.style.left = (150 + startHour * hourWidth) + "px";
           eventDiv.style.width = ((endHour - startHour) * hourWidth) + "px";
-          eventDiv.textContent = ev.title;
+          // Show title and optional location in the event bar
+          let evText = ev.title || "(ohne Titel)";
+          if (ev.location && ev.location.trim()) evText += " • " + ev.location.trim();
+          // Force '@' separator for title/location
+          evText = (ev.title || "(ohne Titel)") + ((ev.location && ev.location.trim()) ? " @ " + ev.location.trim() : "");
+          eventDiv.textContent = evText;
 
           // Link the element to the event
           eventDiv.dataset.eventIndex = data.events.indexOf(ev);
 
           // Dragging
           makeDraggable(eventDiv);
+
+          // Open editor on double click
+          eventDiv.addEventListener('dblclick', (e) => {
+            const idxOpen = parseInt(eventDiv.dataset.eventIndex, 10);
+            if (!isNaN(idxOpen)) {
+              // Defer to allow dblclick after any drag end
+              setTimeout(() => {
+                if (typeof openEvModal === 'function') openEvModal(idxOpen);
+              }, 0);
+            }
+          });
 
           // Resizing
           const leftHandle = document.createElement("div");
@@ -589,6 +646,8 @@
           loadCalendar(tableData);
           document.getElementById("downloadBtn").disabled = false;
           document.getElementById("manageBtn").disabled = false;
+          const neb = document.getElementById("newEventBtn");
+          if (neb) neb.disabled = false;
         } catch (err) {
           document.getElementById("calendar").textContent =
             "Invalid JSON file: " + err;
@@ -639,6 +698,176 @@
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && gmModal.classList.contains("open")) closeGmModal();
     });
+
+    // ---- Termin-Editor (Neu/Edit) ----
+    const evModal = document.getElementById("evModal");
+    const evClose = document.getElementById("evModalClose");
+    const evBody = document.getElementById("evModalBody");
+    const newEventBtn = document.getElementById("newEventBtn");
+
+    function openEvModal(eventIndex = -1) {
+      renderEventEditor(eventIndex);
+      evModal.classList.add("open");
+      evModal.setAttribute("aria-hidden", "false");
+    }
+    function closeEvModal() {
+      evModal.classList.remove("open");
+      evModal.setAttribute("aria-hidden", "true");
+    }
+    if (evClose) evClose.addEventListener("click", closeEvModal);
+    if (evModal) evModal.addEventListener("click", (e) => { if (e.target === evModal) closeEvModal(); });
+    if (newEventBtn) newEventBtn.addEventListener("click", () => openEvModal(-1));
+
+    function renderEventEditor(eventIndex) {
+      const isNew = eventIndex === -1;
+      const ev = isNew ? { title: "", start: "", end: "", color: "", attendees: [], notes: "", location: "" } : { ...tableData.events[eventIndex] };
+      const todayStr = new Date().toISOString().slice(0,10);
+      const baseDate = (ev.start && ev.start.includes('T')) ? ev.start.split('T')[0] : (tableData?.date || todayStr);
+      const startVal = ev.start && ev.start.includes('T') ? ev.start.split('T')[1] : "09:00";
+      const endVal = ev.end && ev.end.includes('T') ? ev.end.split('T')[1] : "10:00";
+      const startDateVal = ev.start && ev.start.includes('T') ? ev.start.split('T')[0] : baseDate;
+      const endDateVal = ev.end && ev.end.includes('T') ? ev.end.split('T')[0] : startDateVal;
+
+      evBody.innerHTML = "";
+      const form = document.createElement("div");
+      form.style.display = "grid";
+      form.style.gridTemplateColumns = "1fr 1fr";
+      form.style.gap = "10px";
+
+      const titleInput = document.createElement("input");
+      titleInput.type = "text"; titleInput.placeholder = "Titel"; titleInput.value = ev.title || ""; titleInput.style.gridColumn = "1 / span 2";
+      form.appendChild(titleInput);
+
+      // Ort
+      const locationInput = document.createElement("input");
+      locationInput.type = "text"; locationInput.placeholder = "Ort"; locationInput.value = ev.location || ""; locationInput.style.gridColumn = "1 / span 2";
+      form.appendChild(locationInput);
+
+      // Beginn/Ende kompakt
+      const dtWrap = document.createElement("div");
+      dtWrap.className = "ev-dt";
+      // Beginn
+      const startBlock = document.createElement("div"); startBlock.className = "ev-block";
+      const startHead = document.createElement("div"); startHead.className = "ev-head"; startHead.textContent = "Beginn";
+      const startDate = document.createElement("input"); startDate.type = "date"; startDate.value = startDateVal;
+      const startTime = document.createElement("input"); startTime.type = "time"; startTime.value = startVal;
+      startBlock.appendChild(startHead); startBlock.appendChild(startDate); startBlock.appendChild(startTime);
+      dtWrap.appendChild(startBlock);
+      // Ende
+      const endBlock = document.createElement("div"); endBlock.className = "ev-block";
+      const endHead = document.createElement("div"); endHead.className = "ev-head"; endHead.textContent = "Ende";
+      const endDate = document.createElement("input"); endDate.type = "date"; endDate.value = endDateVal;
+      const endTime = document.createElement("input"); endTime.type = "time"; endTime.value = endVal;
+      endBlock.appendChild(endHead); endBlock.appendChild(endDate); endBlock.appendChild(endTime);
+      dtWrap.appendChild(endBlock);
+      form.appendChild(dtWrap);
+
+      const notes = document.createElement("textarea"); notes.placeholder = "Notizen"; notes.value = ev.notes || ""; notes.style.gridColumn = "1 / span 2"; notes.rows = 3; form.appendChild(notes);
+
+      // Color picker for event color
+      let userChangedColor = false;
+      const colorWrap = document.createElement("div");
+      const colorLbl = document.createElement("label"); colorLbl.textContent = "Farbe";
+      const colorInput = document.createElement("input"); colorInput.type = "color";
+      let initialColor = ev.color || "#4caf50";
+      // If existing attendees include a group, suggest its color
+      (tableData.groups||[]).some(g => {
+        if ((ev.attendees||[]).includes(g.name) && !ev.color) { initialColor = ensureGroupColor(g); return true; }
+        return false;
+      });
+      colorInput.value = initialColor;
+      colorInput.addEventListener("input", () => { userChangedColor = true; });
+      colorWrap.appendChild(colorLbl); colorWrap.appendChild(colorInput);
+      form.appendChild(colorWrap);
+
+      const groupsBox = document.createElement("div"); groupsBox.style.gridColumn = "1 / span 2";
+      const groupsTitle = document.createElement("div"); groupsTitle.textContent = "Gruppen"; groupsTitle.style.fontWeight = "bold"; groupsBox.appendChild(groupsTitle);
+      const groupsWrap = document.createElement("div"); groupsWrap.style.display = "flex"; groupsWrap.style.flexWrap = "wrap"; groupsWrap.style.gap = "10px";
+      tableData.groups.forEach((g, i) => {
+        const wrap = document.createElement("label"); wrap.style.display = "inline-flex"; wrap.style.alignItems = "center"; wrap.style.gap = "6px";
+        const chk = document.createElement("input"); chk.type = "checkbox"; chk.value = g.name; chk.checked = (ev.attendees||[]).includes(g.name);
+        const swatch = document.createElement("span"); swatch.style.display = "inline-block"; swatch.style.width = "10px"; swatch.style.height = "10px"; swatch.style.border = "1px solid #ccc"; swatch.style.background = ensureGroupColor(g, i);
+        const txt = document.createElement("span"); txt.textContent = g.name;
+        wrap.appendChild(chk); wrap.appendChild(swatch); wrap.appendChild(txt);
+        groupsWrap.appendChild(wrap);
+      });
+      // If user hasn't chosen a color manually, adapt to first selected group
+      function syncColorFromSelection() {
+        if (userChangedColor) return;
+        const firstChecked = Array.from(groupsWrap.querySelectorAll('input[type="checkbox"]')).find(c => c.checked);
+        if (firstChecked) { colorInput.value = getGroupColorByName(firstChecked.value); }
+      }
+      groupsWrap.addEventListener('change', syncColorFromSelection);
+      groupsBox.appendChild(groupsWrap); form.appendChild(groupsBox);
+
+      const autoMembersWrap = document.createElement("label"); autoMembersWrap.style.gridColumn = "1 / span 2";
+      const autoMembers = document.createElement("input"); autoMembers.type = "checkbox"; autoMembers.checked = true; autoMembersWrap.appendChild(autoMembers);
+      autoMembersWrap.appendChild(document.createTextNode(" Mitglieder ausgewählter Gruppen übernehmen"));
+      form.appendChild(autoMembersWrap);
+
+      const peopleBox = document.createElement("div"); peopleBox.style.gridColumn = "1 / span 2";
+      const peopleTitle = document.createElement("div"); peopleTitle.textContent = "Teilnehmer"; peopleTitle.style.fontWeight = "bold"; peopleBox.appendChild(peopleTitle);
+      tableData.groups.forEach((g) => {
+        const gHead = document.createElement("div"); gHead.textContent = g.name; gHead.style.marginTop = "6px"; gHead.style.fontSize = "12px"; gHead.style.color = "#555"; peopleBox.appendChild(gHead);
+        const pWrap = document.createElement("div"); pWrap.style.display = "flex"; pWrap.style.flexWrap = "wrap"; pWrap.style.gap = "10px";
+        (g.people||[]).forEach((p) => {
+          const wrap = document.createElement("label"); wrap.style.display = "inline-flex"; wrap.style.alignItems = "center"; wrap.style.gap = "6px";
+          const chk = document.createElement("input"); chk.type = "checkbox"; chk.value = p; chk.checked = (ev.attendees||[]).includes(p);
+          const bullet = document.createElement("span"); bullet.textContent = "•"; bullet.style.color = ensureGroupColor(g);
+          const txt = document.createElement("span"); txt.textContent = p;
+          wrap.appendChild(chk); wrap.appendChild(bullet); wrap.appendChild(txt);
+          pWrap.appendChild(wrap);
+        });
+        peopleBox.appendChild(pWrap);
+      });
+      form.appendChild(peopleBox);
+
+      const actions = document.createElement("div"); actions.style.gridColumn = "1 / span 2"; actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.justifyContent = "flex-end";
+      const saveBtn = document.createElement("button"); saveBtn.textContent = isNew ? "Erstellen" : "Speichern";
+      const cancelBtn = document.createElement("button"); cancelBtn.textContent = "Abbrechen";
+      const delBtn = !isNew ? document.createElement("button") : null;
+      if (delBtn) { delBtn.textContent = "Löschen"; delBtn.style.marginRight = "auto"; actions.appendChild(delBtn); }
+      actions.appendChild(cancelBtn); actions.appendChild(saveBtn);
+      form.appendChild(actions);
+
+      if (delBtn) delBtn.addEventListener("click", () => {
+        if (confirm("Termin wirklich löschen?")) {
+          tableData.events.splice(eventIndex, 1);
+          loadCalendar(tableData);
+          closeEvModal();
+        }
+      });
+      cancelBtn.addEventListener("click", (e) => { e.preventDefault(); closeEvModal(); });
+      saveBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const sd = startDate.value; const ed = endDate.value;
+        const st = startTime.value; const et = endTime.value;
+        if (!sd || !st || !ed || !et) { alert("Bitte Start- und Enddatum/-zeit angeben."); return; }
+        const startIso = `${sd}T${st}`; const endIso = `${ed}T${et}`;
+        if (new Date(startIso) >= new Date(endIso)) { alert("Ende muss nach dem Start liegen."); return; }
+        const sels = [];
+        groupsWrap.querySelectorAll('input[type="checkbox"]').forEach(chk => { if (chk.checked) sels.push(chk.value); });
+        peopleBox.querySelectorAll('input[type="checkbox"]').forEach(chk => { if (chk.checked) sels.push(chk.value); });
+        if (autoMembers.checked) {
+          (tableData.groups||[]).forEach(g => { if (sels.includes(g.name)) { (g.people||[]).forEach(p => { if (!sels.includes(p)) sels.push(p); }); } });
+        }
+        const color = colorInput.value || "#4caf50";
+        const newEv = {
+          title: (titleInput.value||"").trim() || "(ohne Titel)",
+          start: startIso,
+          end: endIso,
+          color,
+          attendees: sels,
+          notes: (notes.value||""),
+          location: (locationInput.value||"").trim()
+        };
+        if (isNew) tableData.events.push(newEv); else tableData.events[eventIndex] = newEv;
+        loadCalendar(tableData);
+        closeEvModal();
+      });
+
+      evBody.appendChild(form);
+    }
   </script>
 </body>
 </html>
