@@ -1,0 +1,49 @@
+{
+  "date": "2025-09-11",
+  "groups": [
+    {
+      "name": "Group A",
+      "people": [
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "name": "Group B",
+      "people": [
+        "Charlie"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "title": "Meeting",
+      "start": "2025-09-10T05:00",
+      "end": "2025-09-10T07:00",
+      "color": "#4caf50",
+      "attendees": [
+        "Group A",
+        "Alice",
+        "Bob"
+      ]
+    },
+    {
+      "title": "Code Review",
+      "start": "2025-09-11T13:00",
+      "end": "2025-09-11T15:00",
+      "color": "#2196f3",
+      "attendees": [
+        "Alice"
+      ]
+    },
+    {
+      "title": "Workshop",
+      "start": "2025-09-11T10:00",
+      "end": "2025-09-11T12:00",
+      "color": "#f44336",
+      "attendees": [
+        "Charlie"
+      ]
+    }
+  ]
+}

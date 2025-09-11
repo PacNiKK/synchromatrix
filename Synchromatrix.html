@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive Horizontal Calendar</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    input[type="file"], input[type="range"], button { margin-bottom: 10px; }
+    #calendarWrapper {
+      overflow-x: auto;
+      border: 1px solid #ccc;
+    }
+    .timeline {
+      display: grid;
+      grid-template-columns: 150px repeat(24, var(--hour-width, 60px));
+      min-width: calc(150px + 24 * var(--hour-width, 60px));
+      border-bottom: 1px solid #ccc;
+      position: relative;
+    }
+    .header {
+      font-weight: bold;
+      text-align: center;
+      border-right: 1px solid #ccc;
+      padding: 2px;
+    }
+    .label {
+      border-right: 1px solid #ccc;
+      padding: 2px;
+      background: #f0f0f0;
+    }
+    .cell {
+      border: 1px solid #eee;
+      height: 40px;
+      position: relative;
+    }
+    .event {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      border-radius: 4px;
+      color: white;
+      font-size: 12px;
+      padding: 2px 4px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      cursor: grab;
+    }
+    .event:active { cursor: grabbing; }
+    .resize-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: ew-resize;
+    }
+    .resize-handle.left { left: 0; }
+    .resize-handle.right { right: 0; }
+  </style>
+</head>
+<body>
+  <h1>Interactive Horizontal Calendar</h1>
+  <p>
+    <label for="fileInput">Select JSON file:</label>
+    <input type="file" id="fileInput" accept=".json">
+    <button id="downloadBtn" disabled>Download Updated JSON</button>
+  </p>
+  <p>
+    Zoom: <input type="range" id="zoomSlider" min="30" max="200" value="60">
+  </p>
+  <div id="calendarWrapper">
+    <div id="calendar"></div>
+  </div>
+
+  <script>
+    let tableData;
+    let hourWidth = 60; // px per hour
+
+    function loadCalendar(data) {
+      const container = document.getElementById("calendar");
+      container.innerHTML = "";
+      container.style.setProperty("--hour-width", hourWidth + "px");
+
+      const hours = [...Array(24).keys()];
+
+      // Header row
+      const header = document.createElement("div");
+      header.className = "timeline";
+      header.appendChild(document.createElement("div")); // empty top-left
+      hours.forEach(h => {
+        const div = document.createElement("div");
+        div.className = "header";
+        div.textContent = h.toString().padStart(2, "0") + ":00";
+        header.appendChild(div);
+      });
+      container.appendChild(header);
+
+      // Build rows
+      function getRows() {
+        const rows = [];
+        data.groups.forEach(g => {
+          rows.push({ type: "group", name: g.name });
+          g.people.forEach(p => rows.push({ type: "person", name: p, group: g.name }));
+        });
+        return rows;
+      }
+
+      const rows = getRows();
+
+      rows.forEach(row => {
+        const rowDiv = document.createElement("div");
+        rowDiv.className = "timeline";
+
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = row.type === "group" ? row.name : "↳ " + row.name;
+        rowDiv.appendChild(label);
+
+        hours.forEach(() => {
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          rowDiv.appendChild(cell);
+        });
+
+        container.appendChild(rowDiv);
+
+        // Place events
+        data.events.forEach(ev => {
+          const attendees = ev.attendees || [];
+          const match =
+            (row.type === "group" && attendees.includes(row.name)) ||
+            (row.type === "person" && attendees.includes(row.name));
+          if (!match) return;
+
+          const start = new Date(ev.start);
+          const end = new Date(ev.end);
+          const startHour = start.getHours() + start.getMinutes() / 60;
+          const endHour = end.getHours() + end.getMinutes() / 60;
+
+          const eventDiv = document.createElement("div");
+          eventDiv.className = "event";
+          eventDiv.style.background = ev.color;
+          eventDiv.style.left = (150 + startHour * hourWidth) + "px";
+          eventDiv.style.width = ((endHour - startHour) * hourWidth) + "px";
+          eventDiv.textContent = ev.title;
+
+          // Link the element to the event
+          eventDiv.dataset.eventIndex = data.events.indexOf(ev);
+
+          // Dragging
+          makeDraggable(eventDiv);
+
+          // Resizing
+          const leftHandle = document.createElement("div");
+          leftHandle.className = "resize-handle left";
+          eventDiv.appendChild(leftHandle);
+          makeResizable(leftHandle, "left", eventDiv);
+
+          const rightHandle = document.createElement("div");
+          rightHandle.className = "resize-handle right";
+          eventDiv.appendChild(rightHandle);
+          makeResizable(rightHandle, "right", eventDiv);
+
+          rowDiv.appendChild(eventDiv);
+        });
+      });
+    }
+
+    function updateEvent(ev, leftPx, widthPx) {
+  // Snap to nearest 5 minutes
+  const totalMinutes = Math.round(startHourFloat * 60 / 5) * 5;
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+
+  const durationMinutes = Math.round((widthPx / hourWidth) * 60 / 5) * 5;
+  const endTotalMinutes = totalMinutes + durationMinutes;
+  const endHour = Math.floor(endTotalMinutes / 60);
+  const endMinute = endTotalMinutes % 60;
+
+  const dateStr = ev.start.split("T")[0];
+  const newStart = new Date(dateStr + "T00:00");
+  newStart.setHours(hour, minute, 0, 0);
+  const newEnd = new Date(dateStr + "T00:00");
+  newEnd.setHours(endHour, endMinute, 0, 0);
+
+  ev.start = newStart.toISOString().slice(0,16);
+  ev.end = newEnd.toISOString().slice(0,16);
+}
+
+    function syncAllEventElements(ev) {
+      const idx = tableData.events.indexOf(ev);
+      const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
+      const start = new Date(ev.start);
+      const end = new Date(ev.end);
+      const startHour = start.getHours() + start.getMinutes() / 60;
+      const endHour = end.getHours() + end.getMinutes() / 60;
+      elems.forEach(el => {
+        el.style.left = (150 + startHour * hourWidth) + "px";
+        el.style.width = ((endHour - startHour) * hourWidth) + "px";
+      });
+    }
+
+    function makeDraggable(el) {
+  let isDragging = false, startX, origLeft;
+  const ev = tableData.events[el.dataset.eventIndex];
+
+  el.addEventListener("mousedown", e => {
+    if (e.target.classList.contains("resize-handle")) return; // ignore resize
+    isDragging = true;
+    startX = e.clientX;
+    origLeft = parseFloat(el.style.left);
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", e => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const newLeft = origLeft + dx;
+
+    // Move all event elements visually
+    const idx = tableData.events.indexOf(ev);
+    const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
+    elems.forEach(elm => {
+      elm.style.left = newLeft + "px";
+    });
+  });
+
+  window.addEventListener("mouseup", e => {
+    if (isDragging) {
+      isDragging = false;
+      // Use the new left position to update event data
+      const idx = tableData.events.indexOf(ev);
+      const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
+      // Use the left of the first element (they are all the same now)
+      const leftPx = parseFloat(elems[0].style.left);
+      const widthPx = parseFloat(elems[0].style.width);
+      updateEvent(ev, leftPx, widthPx);
+      syncAllEventElements(ev);
+    }
+  });
+}
+
+    function makeResizable(handle, side, el) {
+      let isResizing = false, startX, origWidth, origLeft;
+      const ev = tableData.events[el.dataset.eventIndex];
+    
+      handle.addEventListener("mousedown", e => {
+        isResizing = true;
+        startX = e.clientX;
+        origWidth = parseFloat(el.style.width);
+        origLeft = parseFloat(el.style.left);
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    
+      window.addEventListener("mousemove", e => {
+        if (!isResizing) return;
+        const dx = e.clientX - startX;
+        if (side === "right") {
+          el.style.width = (origWidth + dx) + "px";
+        } else {
+          el.style.left = (origLeft + dx) + "px";
+          el.style.width = (origWidth - dx) + "px";
+        }
+        
+        //syncAllEventElements(ev);
+      });
+    
+      window.addEventListener("mouseup", e => {
+        if (isResizing) {
+          isResizing = false;
+          updateEvent(ev, parseFloat(el.style.left), parseFloat(el.style.width));
+          syncAllEventElements(ev);
+          alert("Test");
+        }
+      });
+    }
+
+
+    // File selection
+    document.getElementById("fileInput").addEventListener("change", function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          tableData = JSON.parse(evt.target.result);
+          loadCalendar(tableData);
+          document.getElementById("downloadBtn").disabled = false;
+        } catch (err) {
+          document.getElementById("calendar").textContent =
+            "Invalid JSON file: " + err;
+        }
+      };
+      reader.readAsText(file, "UTF-8");
+    });
+
+    // Zoom
+    document.getElementById("zoomSlider").addEventListener("input", e => {
+      hourWidth = parseInt(e.target.value);
+      if (tableData) loadCalendar(tableData);
+    });
+
+    // Download JSON
+    document.getElementById("downloadBtn").addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(tableData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "updated_calendar.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
