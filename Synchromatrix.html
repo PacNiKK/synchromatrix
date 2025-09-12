@@ -924,7 +924,7 @@
           eventDiv.className = "event";
           eventDiv.style.background = ev.color;
           eventDiv.style.left = (150 + startHour * hourWidth) + "px";
-          eventDiv.style.width = (((endHour - startHour) * hourWidth) - 8 ) + "px"; // -8 for resize handles
+          eventDiv.style.width = ((endHour - startHour) * hourWidth) + "px";
           // Show title and optional location in the event bar
           let evText = ev.title || "(ohne Titel)";
           if (ev.location && ev.location.trim()) evText += " • " + ev.location.trim();
@@ -1096,26 +1096,33 @@ function syncAllEventElements(ev) {
       });
   
       window.addEventListener("mousemove", e => {
-
-        
-        
         if (!isResizing) return;
         const dx = e.clientX - startX;
         if (Math.abs(dx) < 2) return; // ignore micro movements
         hasResized = true;
+        let newLeft, newWidth;
         if (side === "right") {
-            newLeft = origLeft;
-            newWidth = origWidth + dx;
+          newLeft = origLeft;
+          newWidth = origWidth + dx;
         } else {
-            newLeft = origLeft + dx;
-            newWidth = origWidth - dx;
+          newLeft = origLeft + dx;
+          newWidth = origWidth - dx;
+        }
+        // Enforce minimal width to avoid negative or too small bars
+        const minWidth = Math.max(6, (hourWidth * 0.25)); // quarter hour or handle width
+        if (newWidth < minWidth) {
+          // Clamp keeping the appropriate edge anchored
+          if (side === 'left') {
+            newLeft = origLeft + (origWidth - minWidth);
+          }
+          newWidth = minWidth;
         }
         // Move all event elements visually
         const idx = tableData.events.indexOf(ev);
         const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
         elems.forEach(elm => {
-            elm.style.left = newLeft + "px";
-            elm.style.width = newWidth + "px";
+          elm.style.left = newLeft + "px";
+          elm.style.width = newWidth + "px";
         });
       });
     
