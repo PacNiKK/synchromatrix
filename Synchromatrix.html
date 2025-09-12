@@ -780,48 +780,45 @@
 
     function updateEvent(ev, leftPx, widthPx) {
 
-  // Snap to nearest 5 minutes
-  const snapMinutes = 30;
-  const totalMinutes = Math.round(((leftPx-150) / hourWidth) * 60 / snapMinutes) * snapMinutes;
-  const hour = Math.floor(totalMinutes / 60);
-  const minute = totalMinutes % 60;
+  // Snap to a fine grid to avoid visible jumps
+  const snapMinutes = 15;
+  const startTotalMin = Math.max(0, Math.round(((leftPx - 150) / hourWidth) * 60 / snapMinutes) * snapMinutes);
+  const startHour = Math.floor(startTotalMin / 60);
+  const startMinute = startTotalMin % 60;
 
-  const durationMinutes = Math.round((widthPx / hourWidth) * 60 / snapMinutes) * snapMinutes;
-  const endTotalMinutes = totalMinutes + durationMinutes;
-  const endHour = Math.floor(endTotalMinutes / 60);
-  const endMinute = endTotalMinutes % 60;
+  const durMinRaw = Math.max(1, Math.round((widthPx / hourWidth) * 60 / snapMinutes) * snapMinutes);
+  const durationMinutes = Math.max(snapMinutes, durMinRaw);
+  const endTotalMin = startTotalMin + durationMinutes;
+  const daysAdded = Math.floor(endTotalMin / (60 * 24));
+  const endHourLocal = Math.floor((endTotalMin / 60)) % 24;
+  const endMinute = endTotalMin % 60;
 
+  const dateStr = (ev.start || new Date().toISOString()).split("T")[0];
+  const pad = (n) => String(n).padStart(2, '0');
+  const [yy, mm, dd] = dateStr.split('-').map(n => parseInt(n, 10));
+  const endDate = new Date(yy, (mm - 1), dd + daysAdded); // local-safe
+  const endDateStr = `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())}`;
 
-  const dateStr = ev.start.split("T")[0];
-  const newStart = new Date(dateStr + "T00:00");
-  newStart.setDate(newStart.getDate());
-  newStart.setHours(hour, minute, 0, 0); // +2 for timezone offset
-  const newEnd = new Date(dateStr + "T00:00");
-  newEnd.setDate(newEnd.getDate()+Math.floor((endHour)/24));
-  newEnd.setHours(endHour%24, endMinute, 0, 0); // +2 for timezone offset
-  ev.start = new Date(newStart.getTime() - (newStart.getTimezoneOffset() * 60000)).toISOString().slice(0,16);
-  ev.end = new Date(newEnd.getTime() - (newEnd.getTimezoneOffset() * 60000)).toISOString().slice(0,16);
+  ev.start = `${dateStr}T${pad(startHour)}:${pad(startMinute)}`;
+  ev.end = `${endDateStr}T${pad(endHourLocal)}:${pad(endMinute)}`;
   syncAllEventElements(ev);
 }
 
 function syncAllEventElements(ev) {
   const idx = tableData.events.indexOf(ev);
   const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
-  loadCalendar(tableData);
-  //const start = new Date(ev.start);
-  //const end = new Date(ev.end);
-  //const clipDate = new Date(tableData.startDate).getDate();
-  //const clipEnd = new Date(tableData.endDate).getDate();
-  //const startHour = (clipDate-start.getDate())*24+start.getHours() + start.getMinutes() / 60;
-  //const endHour = (clipDate-end.getDate())*24+end.getHours() + end.getMinutes() / 60;
-  //    elems.forEach(el => {
-  //      el.style.left = (150 + startHour * hourWidth) + "px";
-  //      el.style.width = (((endHour - startHour) * hourWidth)-8) + "px"; // -8 for resize handles
-  //    });
-    }
+  const start = new Date(ev.start);
+  const end = new Date(ev.end);
+  const sH = start.getHours() + start.getMinutes() / 60;
+  const eH = end.getHours() + end.getMinutes() / 60;
+  elems.forEach(el => {
+    el.style.left = (150 + sH * hourWidth) + "px";
+    el.style.width = ((eH - sH) * hourWidth) + "px";
+  });
+}
 
     function makeDraggable(el) {
-  let isDragging = false, startX, origLeft;
+  let isDragging = false, startX, origLeft, hasMoved = false;
   const ev = tableData.events[el.dataset.eventIndex];
 
   el.addEventListener("mousedown", e => {
@@ -829,12 +826,15 @@ function syncAllEventElements(ev) {
     isDragging = true;
     startX = e.clientX;
     origLeft = parseFloat(el.style.left);
+    hasMoved = false;
     e.preventDefault();
   });
 
   window.addEventListener("mousemove", e => {
     if (!isDragging) return;
     const dx = e.clientX - startX;
+    if (Math.abs(dx) < 3) return; // small jitter ignored
+    hasMoved = true;
     const newLeft = origLeft + dx;
 
     // Move all event elements visually
@@ -848,37 +848,41 @@ function syncAllEventElements(ev) {
   window.addEventListener("mouseup", e => {
     if (isDragging) {
         isDragging = false;
-        // Use the new left position to update event data
-        const idx = tableData.events.indexOf(ev);
-        const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
-        // Use the left of the first element (they are all the same now)
-        const leftPx = parseFloat(elems[0].style.left);
-        const widthPx = parseFloat(elems[0].style.width);
-        updateEvent(ev, leftPx, widthPx);
-        
+        if (hasMoved) {
+          // Use the new left position to update event data
+          const idx = tableData.events.indexOf(ev);
+          const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
+          // Use the left of the first element (they are all the same now)
+          const leftPx = parseFloat(elems[0].style.left);
+          const widthPx = parseFloat(elems[0].style.width);
+          updateEvent(ev, leftPx, widthPx);
+        }
     }
   });
 }
 
     function makeResizable(handle, side, el) {
-      let isResizing = false, startX, origWidth, origLeft;
+      let isResizing = false, startX, origWidth, origLeft, hasResized = false;
       const ev = tableData.events[el.dataset.eventIndex];
-    
+  
       handle.addEventListener("mousedown", e => {
         isResizing = true;
         startX = e.clientX;
         origWidth = parseFloat(el.style.width);
         origLeft = parseFloat(el.style.left);
+        hasResized = false;
         e.preventDefault();
         e.stopPropagation();
       });
-    
+  
       window.addEventListener("mousemove", e => {
 
         
         
         if (!isResizing) return;
         const dx = e.clientX - startX;
+        if (Math.abs(dx) < 2) return; // ignore micro movements
+        hasResized = true;
         if (side === "right") {
             newLeft = origLeft;
             newWidth = origWidth + dx;
@@ -898,8 +902,10 @@ function syncAllEventElements(ev) {
       window.addEventListener("mouseup", e => {
         if (isResizing) {
           isResizing = false;
-          updateEvent(ev, parseFloat(el.style.left), parseFloat(el.style.width));
-          syncAllEventElements(ev);
+          if (hasResized) {
+            updateEvent(ev, parseFloat(el.style.left), parseFloat(el.style.width));
+            syncAllEventElements(ev);
+          }
         }
       });
     }
