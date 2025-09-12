@@ -532,7 +532,6 @@
 
       // initiale Liste
       renderList();
-      return;
 
       const listWrap = document.createElement("div");
       listWrap.style.marginTop = "10px";
@@ -778,28 +777,36 @@
       });
     }
 
-    function updateEvent(ev, leftPx, widthPx) {
+function updateEvent(ev, leftPx, widthPx) {
 
   // Snap to a fine grid to avoid visible jumps
-  const snapMinutes = 15;
-  const startTotalMin = Math.max(0, Math.round(((leftPx - 150) / hourWidth) * 60 / snapMinutes) * snapMinutes);
-  const startHour = Math.floor(startTotalMin / 60);
-  const startMinute = startTotalMin % 60;
+  const snapMinutes = 30;
 
+  // Calculate the snapped start time in minutes, including the day offset
+  const startTotalMin = Math.max(0, Math.round(((leftPx - 150) / hourWidth) * 60 / snapMinutes) * snapMinutes);
+  const totalStartMinWithDay = startTotalMin;
+  const startDay = Math.floor(totalStartMinWithDay / (24 * 60));
+  const startHour = Math.floor((totalStartMinWithDay % (24 * 60)) / 60);
+  const startMinute = totalStartMinWithDay % 60;
+
+  // Calculate snapped duration and end time
   const durMinRaw = Math.max(1, Math.round((widthPx / hourWidth) * 60 / snapMinutes) * snapMinutes);
   const durationMinutes = Math.max(snapMinutes, durMinRaw);
-  const endTotalMin = startTotalMin + durationMinutes;
-  const daysAdded = Math.floor(endTotalMin / (60 * 24));
-  const endHourLocal = Math.floor((endTotalMin / 60)) % 24;
+  const endTotalMin = totalStartMinWithDay + durationMinutes;
+  const endDay = Math.floor(endTotalMin / (24 * 60));
+  const endHourLocal = Math.floor((endTotalMin % (24 * 60)) / 60);
   const endMinute = endTotalMin % 60;
 
-  const dateStr = (ev.start || new Date().toISOString()).split("T")[0];
+  // Format dates
+  const dateStr = (tableData.startDate || new Date().toISOString()).split("T")[0];
   const pad = (n) => String(n).padStart(2, '0');
   const [yy, mm, dd] = dateStr.split('-').map(n => parseInt(n, 10));
-  const endDate = new Date(yy, (mm - 1), dd + daysAdded); // local-safe
-  const endDateStr = `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())}`;
+  const startDateObj = new Date(yy, (mm - 1), dd + startDay);
+  const endDateObj = new Date(yy, (mm - 1), dd + endDay);
+  const startDateStr = `${startDateObj.getFullYear()}-${pad(startDateObj.getMonth()+1)}-${pad(startDateObj.getDate())}`;
+  const endDateStr = `${endDateObj.getFullYear()}-${pad(endDateObj.getMonth()+1)}-${pad(endDateObj.getDate())}`;
 
-  ev.start = `${dateStr}T${pad(startHour)}:${pad(startMinute)}`;
+  ev.start = `${startDateStr}T${pad(startHour)}:${pad(startMinute)}`;
   ev.end = `${endDateStr}T${pad(endHourLocal)}:${pad(endMinute)}`;
   syncAllEventElements(ev);
 }
@@ -809,11 +816,15 @@ function syncAllEventElements(ev) {
   const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
   const start = new Date(ev.start);
   const end = new Date(ev.end);
-  const sH = start.getHours() + start.getMinutes() / 60;
-  const eH = end.getHours() + end.getMinutes() / 60;
+  const calendarStart = tableData.startDate ? new Date(tableData.startDate) : new Date();
+  // Calculate day offsets
+  const startDayOffset = Math.floor((start - calendarStart) / (1000 * 60 * 60 * 24));
+  const endDayOffset = Math.floor((end - calendarStart) / (1000 * 60 * 60 * 24));
+  const sH = startDayOffset * 24 + start.getHours() + start.getMinutes() / 60;
+  const eH = endDayOffset * 24 + end.getHours() + end.getMinutes() / 60;
   elems.forEach(el => {
     el.style.left = (150 + sH * hourWidth) + "px";
-    el.style.width = ((eH - sH) * hourWidth) + "px";
+    el.style.width = (((eH - sH) * hourWidth)-8) + "px";
   });
 }
 
