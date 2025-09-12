@@ -4,16 +4,18 @@
   <meta charset="UTF-8">
   <title>Interactive Horizontal Calendar</title>
   <style>
+    :root { --table-header-bg: #fafafa; --table-border: #ccc; --row-border: #eee; --cell-padding: 4px; }
     body { font-family: sans-serif; margin: 20px; }
     input[type="file"], input[type="range"], button { margin-bottom: 10px; }
     #calendarWrapper {
       overflow-x: auto;
       border: 1px solid #ccc;
     }
+    #calendar { position: relative; }
     .timeline {
       display: grid;
-      grid-template-columns: 150px repeat(calc(var(--numDays,1)*24), var(--hour-width, 60px));
-      min-width: calc(150px + 24 * var(--hour-width, 60px));
+      grid-template-columns: 150px repeat(var(--totalHours, 24), var(--hour-width, 60px));
+      min-width: calc(150px + var(--totalHours, 24) * var(--hour-width, 60px));
       border-bottom: 1px solid #ccc;
       position: relative;
     }
@@ -23,6 +25,10 @@
       border-right: 1px solid #ccc;
       padding: 2px;
     }
+    .header .h-hour { font-weight: 700; }
+    .header .h-day { font-size: 10px; color: #666; font-weight: 400; }
+    .timeline.date-header .header, .timeline.header-row .header { background: var(--table-header-bg); font-weight: 600; }
+    .now-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #e53935; z-index: 5; pointer-events: none; }
     .label {
       border-right: 1px solid #ccc;
       padding: 4px;
@@ -30,7 +36,8 @@
     }
     .label.group { cursor: pointer; user-select: none; }
     .cell {
-      border: 1px solid #eee;
+      border-right: 1px solid var(--table-border);
+      border-bottom: 1px solid var(--row-border);
       height: 40px;
       position: relative;
     }
@@ -92,6 +99,12 @@
     .gm-chip .gm-chip-actions select { height: 28px; line-height: normal; vertical-align: middle; }
     .gm-chip .gm-del { width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; }
     .gm-chip .gm-chip-actions .gm-del { align-self: center; }
+    /* Drag & Drop visuals for group manager */
+    .gm-chip[draggable="true"] { cursor: grab; }
+    .gm-chip.dragging { opacity: 0.6; }
+    .gm-chip.drag-over-top { box-shadow: inset 0 3px 0 #2196f3; }
+    .gm-chip.drag-over-bottom { box-shadow: inset 0 -3px 0 #2196f3; }
+    .gm-card.gm-drop { border-color: #2196f3 !important; background: #f0f8ff; }
     /* Event editor */
     .ev-dt { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; grid-column: 1 / span 2; }
     .ev-dt .ev-block { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #eee; border-radius: 8px; background: #fafafa; }
@@ -99,20 +112,28 @@
     .ev-dt input[type="date"], .ev-dt input[type="time"] { padding: 4px 6px; }
     /* No-attendees list */
     .na-list { display: grid; grid-template-columns: 1fr 140px 140px auto; gap: 8px 12px; align-items: center; }
-    .na-head { font-weight: 600; color: #444; }
+    .na-list > div { padding: var(--cell-padding); border-bottom: 1px solid var(--row-border); }
+    .na-head { font-weight: 600; color: #444; background: var(--table-header-bg); border-bottom: 1px solid var(--table-border); text-align: center; }
     .na-pill { display: inline-block; width: 12px; height: 12px; border-radius: 999px; border: 1px solid #ccc; margin-right: 6px; vertical-align: middle; }
     .na-row { display: contents; }
     /* Top actions layout */
     .actions-row { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+    .actions-left, .actions-right { display: inline-flex; align-items: center; gap: 8px; }
+    .actions-left { flex-wrap: wrap; }
     .mgmt-row { margin: 10px 0 0; }
   </style>
 </head>
 <body>
   <h1>Interactive Horizontal Calendar</h1>
-  <p>
-    <label for="fileInput">Select JSON file:</label>
-    <input type="file" id="fileInput" accept=".json">
-    <button id="downloadBtn" disabled>Download Updated JSON</button>
+  <p class="actions-row">
+    <span class="actions-left">
+      <label for="fileInput">Select JSON file:</label>
+      <input type="file" id="fileInput" accept=".json">
+    </span>
+    <span class="actions-right">
+      <button id="downloadBtn" disabled>Download Updated JSON</button>
+      <button id="adminBtn" disabled>Admin</button>
+    </span>
   </p>
   <p class="actions-row">
     <button id="newEventBtn" disabled>Neuer Termin</button>
@@ -152,6 +173,16 @@
         <button id="naModalClose" aria-label="Schließen">×</button>
       </header>
       <div id="naModalBody" class="body"></div>
+    </div>
+  </div>
+  <!-- Admin: Zeitraum definieren Modal -->
+  <div id="adminModal" class="modal" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle">
+      <header>
+        <h3 id="adminModalTitle">Zeitraum definieren</h3>
+        <button id="adminModalClose" aria-label="Schließen">×</button>
+      </header>
+      <div id="adminModalBody" class="body"></div>
     </div>
   </div>
   <div id="calendarWrapper">
@@ -285,6 +316,33 @@
         if (!Array.isArray(dst.people)) dst.people = [];
         if (dst.people.includes(name)) { alert("Zielgruppe enthält den Namen bereits."); return; }
         dst.people.push(name);
+        loadCalendar(tableData);
+        updateNoAttCount();
+        renderGroupManager();
+      }
+
+      // DnD-aware move with optional index
+      function movePersonAt(name, fromGroup, toGroup, toIndex) {
+        const src = findGroup(fromGroup);
+        const dst = findGroup(toGroup);
+        if (!src || !dst) return;
+        const fromIdx = (src.people || []).indexOf(name);
+        if (fromIdx === -1) return;
+        // Remove from source
+        src.people.splice(fromIdx, 1);
+        if (!Array.isArray(dst.people)) dst.people = [];
+        // Compute insertion index
+        let insertIndex = typeof toIndex === 'number' && !isNaN(toIndex) ? toIndex : dst.people.length;
+        if (fromGroup === toGroup) {
+          if (insertIndex > fromIdx) insertIndex--;
+        }
+        insertIndex = Math.max(0, Math.min(insertIndex, dst.people.length));
+        // Avoid duplicate when moving across groups
+        if (toGroup !== fromGroup && dst.people.includes(name)) {
+          // skip duplicate
+        } else {
+          dst.people.splice(insertIndex, 0, name);
+        }
         loadCalendar(tableData);
         updateNoAttCount();
         renderGroupManager();
@@ -485,6 +543,33 @@
           }
           header.appendChild(hActions);
 
+          // Allow dropping participants onto the group section to move them here
+          section.dataset.group = g.name;
+          section.addEventListener('dragover', (e) => {
+            try {
+              const txt = e.dataTransfer?.getData('text/plain') || '';
+              const obj = JSON.parse(txt || '{}');
+              if (obj && obj.type === 'gm/person') {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                section.classList.add('gm-drop');
+              }
+            } catch (_) { /* ignore */ }
+          });
+          section.addEventListener('dragleave', () => section.classList.remove('gm-drop'));
+          section.addEventListener('drop', (e) => {
+            e.stopPropagation();
+            section.classList.remove('gm-drop');
+            let obj = null;
+            try { obj = JSON.parse(e.dataTransfer?.getData('text/plain') || '{}'); } catch (_) {}
+            if (!obj || obj.type !== 'gm/person') return;
+            const { person, from } = obj;
+            if (!person || !from) return;
+            const dest = findGroup(g.name);
+            const toIndex = (dest && Array.isArray(dest.people)) ? dest.people.length : 0;
+            movePersonAt(person, from, g.name, toIndex);
+          });
+
           if (!gmCollapsed.has(g.name)) {
             ( (gmSearchTerm ? (g.people||[]).filter(p => p.toLowerCase().includes((gmSearchTerm||"").toLowerCase())) : (g.people||[])) ).forEach(p => {
               const row = document.createElement("div");
@@ -493,6 +578,57 @@
               row.style.alignItems = "center";
               row.style.gap = "8px";
               row.style.padding = "2px 0";
+              // Drag & Drop: make each participant row draggable and droppable
+              row.setAttribute('draggable', 'true');
+              row.dataset.person = p;
+              row.dataset.group = g.name;
+              row.addEventListener('dragstart', (e) => {
+                row.classList.add('dragging');
+                try {
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'gm/person', person: p, from: g.name }));
+                } catch (_) { /* ignore */ }
+              });
+              row.addEventListener('dragend', () => {
+                row.classList.remove('dragging');
+                row.classList.remove('drag-over-top');
+                row.classList.remove('drag-over-bottom');
+              });
+              row.addEventListener('dragover', (e) => {
+                try {
+                  const txt = e.dataTransfer?.getData('text/plain') || '';
+                  const obj = JSON.parse(txt || '{}');
+                  if (obj && obj.type === 'gm/person') {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const r = row.getBoundingClientRect();
+                    const before = (e.clientY - r.top) < (r.height / 2);
+                    row.classList.toggle('drag-over-top', before);
+                    row.classList.toggle('drag-over-bottom', !before);
+                  }
+                } catch (_) { /* ignore */ }
+              });
+              row.addEventListener('dragleave', () => {
+                row.classList.remove('drag-over-top');
+                row.classList.remove('drag-over-bottom');
+              });
+              row.addEventListener('drop', (e) => {
+                e.stopPropagation();
+                row.classList.remove('drag-over-top');
+                row.classList.remove('drag-over-bottom');
+                let obj = null;
+                try { obj = JSON.parse(e.dataTransfer?.getData('text/plain') || '{}'); } catch (_) {}
+                if (!obj || obj.type !== 'gm/person') return;
+                const { person, from } = obj;
+                if (!person || !from) return;
+                const peopleArr = (findGroup(g.name)?.people || []);
+                const targetIdx = peopleArr.indexOf(p);
+                if (targetIdx < 0) { movePersonAt(person, from, g.name); return; }
+                const r = row.getBoundingClientRect();
+                const before = (e.clientY - r.top) < (r.height / 2);
+                const insertAt = before ? targetIdx : (targetIdx + 1);
+                movePersonAt(person, from, g.name, insertAt);
+              });
 
               const name = document.createElement("span");
               name.textContent = p;
@@ -639,9 +775,12 @@
       container.innerHTML = "";
       let startDate = data.startDate ? new Date(data.startDate) : new Date();
       let endDate = data.endDate ? new Date(data.endDate) : new Date();
-      const numDays = endDate.getDate() - startDate.getDate() + 1;
+      const startMid = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      const endMid = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+      const numDays = Math.max(1, Math.round((endMid.getTime() - startMid.getTime())/86400000) + 1);
       container.style.setProperty("--hour-width", hourWidth + "px");
-      container.style.setProperty("--numDays", (data.endDate && data.startDate) ? ((new Date(data.endDate).getDate() - new Date(data.startDate).getDate() + 1)) : 1);
+      container.style.setProperty("--numDays", numDays);
+      container.style.setProperty("--totalHours", (numDays*24).toString());
       // Read start and end date from JSON
 
       const hours = [...Array(numDays*24).keys()];
@@ -649,17 +788,66 @@
       const dayStart = new Date(viewDateStr + "T00:00");
       const dayEnd = new Date(viewDateStr + "T24:00");
 
-      // Header row
+      // Date header row (one cell per day spanning 24 hours)
+      const dateHeader = document.createElement("div");
+      dateHeader.className = "timeline date-header";
+      dateHeader.appendChild(document.createElement("div")); // empty top-left
+      const weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+      for (let d = 0; d < numDays; d++) {
+        const cur = new Date(startMid.getFullYear(), startMid.getMonth(), startMid.getDate() + d);
+        const dd = String(cur.getDate()).padStart(2, '0');
+        const mm = String(cur.getMonth()+1).padStart(2, '0');
+        const label = `${weekdays[cur.getDay()]} ${dd}.${mm}.`;
+        const div = document.createElement("div");
+        div.className = "header";
+        div.textContent = label;
+        div.style.gridColumn = `span ${24}`;
+        dateHeader.appendChild(div);
+      }
+      container.appendChild(dateHeader);
+
+      // Hours header row
       const header = document.createElement("div");
-      header.className = "timeline";
+      header.className = "timeline header-row";
       header.appendChild(document.createElement("div")); // empty top-left
       hours.forEach(h => {
         const div = document.createElement("div");
         div.className = "header";
-        div.textContent = (h%24).toString().padStart(2, "0") + ":00";
+        const hourTxt = (h%24).toString().padStart(2, "0") + ":00";
+        const dIdx = Math.floor(h/24);
+        const cur = new Date(startMid.getFullYear(), startMid.getMonth(), startMid.getDate() + dIdx);
+        const dd = String(cur.getDate()).padStart(2, '0');
+        const mm = String(cur.getMonth()+1).padStart(2, '0');
+        const w = ['So','Mo','Di','Mi','Do','Fr','Sa'][cur.getDay()];
+        const dayTxt = `${w} ${dd}.${mm}.`;
+        const hourEl = document.createElement('div'); hourEl.className = 'h-hour'; hourEl.textContent = hourTxt;
+        const dayEl = document.createElement('div'); dayEl.className = 'h-day'; dayEl.textContent = dayTxt;
+        div.appendChild(hourEl); div.appendChild(dayEl);
         header.appendChild(div);
       });
       container.appendChild(header);
+
+      // Current time indicator
+      try {
+        if (window.__nowTimer) { clearInterval(window.__nowTimer); window.__nowTimer = null; }
+      } catch(_) {}
+      let nowLine = container.querySelector('.now-line');
+      if (!nowLine) { nowLine = document.createElement('div'); nowLine.className = 'now-line'; container.appendChild(nowLine); }
+      const rangeStart = new Date(startMid.getTime());
+      const rangeEnd = new Date(startMid.getTime() + (numDays * 24 * 60 * 60 * 1000));
+      function updateNow() {
+        const now = new Date();
+        if (now >= rangeStart && now <= rangeEnd) {
+          const hoursSince = (now - rangeStart) / 36e5;
+          const left = 150 + hoursSince * hourWidth;
+          nowLine.style.display = '';
+          nowLine.style.left = left + 'px';
+        } else {
+          nowLine.style.display = 'none';
+        }
+      }
+      updateNow();
+      try { window.__nowTimer = setInterval(updateNow, 60 * 1000); } catch(_) {}
 
       // Build rows
       function getRows() {
@@ -731,8 +919,8 @@
           //const clipStart = new Date(Math.max(evStart.getTime(), dayStart.getTime()));
           //const clipEnd = new Date(Math.min(evEnd.getTime(), dayEnd.getTime()));
           //if (clipEnd <= clipStart) return; // no overlap with this day
-          const startHour = (clipStart.getDate()-tableData.startDate.slice(8,10))*24+clipStart.getHours() + clipStart.getMinutes() / 60;
-          const endHour = (clipEnd.getDate()-tableData.startDate.slice(8,10))*24+clipEnd.getHours() + clipEnd.getMinutes() / 60;
+          const startHour = (clipStart - startMid) / 36e5;
+          const endHour = (clipEnd - startMid) / 36e5;
           const eventDiv = document.createElement("div");
           eventDiv.className = "event";
           eventDiv.style.background = ev.color;
@@ -778,29 +966,29 @@
       });
     }
 
+    function getRangeStartMid() {
+      const sd = tableData?.startDate ? new Date(tableData.startDate) : new Date();
+      return new Date(sd.getFullYear(), sd.getMonth(), sd.getDate());
+    }
+
+    function formatIsoLocal(d){
+      const pad = (n)=>String(n).padStart(2,'0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
     function updateEvent(ev, leftPx, widthPx) {
 
   // Snap to a fine grid to avoid visible jumps
   const snapMinutes = 15;
   const startTotalMin = Math.max(0, Math.round(((leftPx - 150) / hourWidth) * 60 / snapMinutes) * snapMinutes);
-  const startHour = Math.floor(startTotalMin / 60);
-  const startMinute = startTotalMin % 60;
-
   const durMinRaw = Math.max(1, Math.round((widthPx / hourWidth) * 60 / snapMinutes) * snapMinutes);
   const durationMinutes = Math.max(snapMinutes, durMinRaw);
-  const endTotalMin = startTotalMin + durationMinutes;
-  const daysAdded = Math.floor(endTotalMin / (60 * 24));
-  const endHourLocal = Math.floor((endTotalMin / 60)) % 24;
-  const endMinute = endTotalMin % 60;
+  const startBase = getRangeStartMid();
+  const startDateTime = new Date(startBase.getTime() + startTotalMin * 60000);
+  const endDateTime = new Date(startBase.getTime() + (startTotalMin + durationMinutes) * 60000);
 
-  const dateStr = (ev.start || new Date().toISOString()).split("T")[0];
-  const pad = (n) => String(n).padStart(2, '0');
-  const [yy, mm, dd] = dateStr.split('-').map(n => parseInt(n, 10));
-  const endDate = new Date(yy, (mm - 1), dd + daysAdded); // local-safe
-  const endDateStr = `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())}`;
-
-  ev.start = `${dateStr}T${pad(startHour)}:${pad(startMinute)}`;
-  ev.end = `${endDateStr}T${pad(endHourLocal)}:${pad(endMinute)}`;
+  ev.start = formatIsoLocal(startDateTime);
+  ev.end = formatIsoLocal(endDateTime);
   syncAllEventElements(ev);
 }
 
@@ -809,8 +997,9 @@ function syncAllEventElements(ev) {
   const elems = document.querySelectorAll(`.event[data-event-index='${idx}']`);
   const start = new Date(ev.start);
   const end = new Date(ev.end);
-  const sH = start.getHours() + start.getMinutes() / 60;
-  const eH = end.getHours() + end.getMinutes() / 60;
+  const base = getRangeStartMid();
+  const sH = (start - base) / 36e5;
+  const eH = (end - base) / 36e5;
   elems.forEach(el => {
     el.style.left = (150 + sH * hourWidth) + "px";
     el.style.width = ((eH - sH) * hourWidth) + "px";
@@ -922,6 +1111,8 @@ function syncAllEventElements(ev) {
           loadCalendar(tableData);
           document.getElementById("downloadBtn").disabled = false;
           document.getElementById("manageBtn").disabled = false;
+          const adb = document.getElementById("adminBtn");
+          if (adb) adb.disabled = false;
           const neb = document.getElementById("newEventBtn");
           if (neb) neb.disabled = false;
           const nab = document.getElementById("noAttBtn");
@@ -979,6 +1170,93 @@ function syncAllEventElements(ev) {
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && gmModal.classList.contains("open")) closeGmModal();
     });
+
+    // ---- Admin: Zeitraum definieren ----
+    const adminModal = document.getElementById("adminModal");
+    const adminClose = document.getElementById("adminModalClose");
+    const adminOpenBtn = document.getElementById("adminBtn");
+
+    function pad2(n){ return String(n).padStart(2,'0'); }
+    function toDateInputValue(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+    function parseDateFlexible(txt, fallbackYear){
+      if (!txt) return null;
+      const s = String(txt).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        const [y,m,d] = s.split('-').map(x=>parseInt(x,10));
+        return new Date(y, m-1, d);
+      }
+      const m = s.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?$/);
+      if (m){
+        const d = parseInt(m[1],10);
+        const mo = parseInt(m[2],10);
+        let y = m[3] ? parseInt(m[3],10) : (fallbackYear || (new Date()).getFullYear());
+        if (y < 100) y = 2000 + y;
+        return new Date(y, mo-1, d);
+      }
+      return null;
+    }
+    function renderAdmin(){
+      const body = document.getElementById('adminModalBody');
+      body.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.style.display = 'grid';
+      wrap.style.gridTemplateColumns = '1fr 1fr';
+      wrap.style.gap = '10px';
+
+      const sd = tableData?.startDate ? new Date(tableData.startDate) : new Date();
+      const ed = tableData?.endDate ? new Date(tableData.endDate) : new Date();
+
+      const sLabel = document.createElement('label'); sLabel.textContent = 'Startdatum';
+      const sInput = document.createElement('input'); sInput.type = 'date'; sInput.value = toDateInputValue(sd); sInput.style.width='100%';
+      const eLabel = document.createElement('label'); eLabel.textContent = 'Enddatum';
+      const eInput = document.createElement('input'); eInput.type = 'date'; eInput.value = toDateInputValue(ed); eInput.style.width='100%';
+
+      const freeTxt = document.createElement('input');
+      freeTxt.type = 'text'; freeTxt.placeholder = 'Freitext: z.B. 8.9-20.9 oder 2025-09-08 bis 2025-09-20';
+      freeTxt.style.gridColumn = '1 / span 2';
+
+      const actions = document.createElement('div'); actions.style.gridColumn = '1 / span 2'; actions.style.display = 'flex'; actions.style.gap = '8px'; actions.style.justifyContent = 'flex-end';
+      const cancel = document.createElement('button'); cancel.textContent = 'Abbrechen';
+      const apply = document.createElement('button'); apply.textContent = 'Anwenden';
+      actions.appendChild(cancel); actions.appendChild(apply);
+
+      wrap.appendChild(sLabel); wrap.appendChild(eLabel);
+      wrap.appendChild(sInput); wrap.appendChild(eInput);
+      wrap.appendChild(freeTxt);
+      wrap.appendChild(actions);
+      body.appendChild(wrap);
+
+      cancel.addEventListener('click', (e)=>{ e.preventDefault(); closeAdmin(); });
+      apply.addEventListener('click', (e)=>{
+        e.preventDefault();
+        const today = new Date();
+        let s = sInput.value ? new Date(sInput.value) : null;
+        let eD = eInput.value ? new Date(eInput.value) : null;
+        const txt = (freeTxt.value||'').trim();
+        if (txt){
+          const parts = txt.split(/\s*(?:-|–|bis|to)\s*/i);
+          if (parts.length === 2){
+            const p1 = parseDateFlexible(parts[0], today.getFullYear());
+            const p2 = parseDateFlexible(parts[1], today.getFullYear());
+            if (p1) s = p1; if (p2) eD = p2;
+          }
+        }
+        if (!s || !eD) { alert('Bitte Start- und Enddatum angeben.'); return; }
+        if (eD < s) { const tmp = s; s = eD; eD = tmp; }
+        const sStr = `${s.getFullYear()}-${pad2(s.getMonth()+1)}-${pad2(s.getDate())}`;
+        const eStr = `${eD.getFullYear()}-${pad2(eD.getMonth()+1)}-${pad2(eD.getDate())}`;
+        tableData.startDate = sStr;
+        tableData.endDate = eStr;
+        tableData.date = sStr;
+        loadCalendar(tableData);
+        closeAdmin();
+      });
+    }
+    function openAdmin(){ if (!tableData) return; renderAdmin(); adminModal.classList.add('open'); adminModal.setAttribute('aria-hidden','false'); }
+    function closeAdmin(){ adminModal.classList.remove('open'); adminModal.setAttribute('aria-hidden','true'); }
+    if (adminOpenBtn) adminOpenBtn.addEventListener('click', openAdmin);
+    if (adminClose) adminClose.addEventListener('click', closeAdmin);
+    if (adminModal) adminModal.addEventListener('click', (e)=>{ if (e.target === adminModal) closeAdmin(); });
 
     // ---- Termin-Editor (Neu/Edit) ----
     const evModal = document.getElementById("evModal");
