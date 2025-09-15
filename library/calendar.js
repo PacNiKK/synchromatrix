@@ -157,14 +157,14 @@
     const data = state.data; const container = document.getElementById("calendar"); if (!container) return;
     container.innerHTML = "";
     if (!data) { container.textContent = 'Bitte JSON laden, um den Kalender zu sehen.'; return; }
-  const startDate = data.startDate ? parseYMD(data.startDate) : new Date();
+    const startDate = data.startDate ? parseYMD(data.startDate) : new Date();
     const endDate = data.endDate ? parseYMD(data.endDate) : new Date();
     const startMid = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
     const endMid = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
     const numDays = Math.max(1, Math.round((endMid.getTime() - startMid.getTime())/86400000) + 1);
-  // Expose render context for helpers (used by auto-scroll to Now)
-  window.SMX.calendar._lastRender = { startMid, numDays };
-    // Mirror CSS variables on container and :root for layout and sticky columns
+    window.SMX.calendar._lastRender = { startMid, numDays };
+
+    // Mirror CSS variables
     container.style.setProperty("--hour-width", state.hourWidth + "px");
     container.style.setProperty("--totalHours", (numDays*24).toString());
     container.style.setProperty("--label-size", state.labelWidth + "px");
@@ -174,9 +174,22 @@
 
     const hours = [...Array(numDays*24).keys()];
 
+    // Apply grid density class on wrapper based on header step
+    const wrapper = document.getElementById('calendarWrapper');
+    const hourStep = (window.SMX.zoom ? window.SMX.zoom.getHourLabelStep(state.hourWidth) : 1);
+    if (wrapper) {
+      wrapper.classList.remove('grid-h','grid-30','grid-15');
+      if (hourStep <= 1) wrapper.classList.add('grid-15');
+      else if (hourStep <= 2) wrapper.classList.add('grid-30');
+      else wrapper.classList.add('grid-h');
+      // Also enable dynamic grid with 4 subdivisions per header block
+      wrapper.classList.add('grid-dyn');
+      wrapper.style.setProperty('--header-step', String(hourStep)); // hours per header division
+    }
+
     const dateHeader = document.createElement("div");
     dateHeader.className = "timeline date-header";
-    const emptyDivDate = document.createElement("div"); // spacer for sticky label column
+    const emptyDivDate = document.createElement("div");
     emptyDivDate.className = "label";
     dateHeader.appendChild(emptyDivDate);
     const weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
@@ -193,11 +206,10 @@
 
     const header = document.createElement("div");
     header.className = "timeline header-row";
-    const emptyDivHour = document.createElement("div"); // spacer for sticky label column
+    const emptyDivHour = document.createElement("div");
     emptyDivHour.className = "label";
     header.appendChild(emptyDivHour);
-    const hourStep = (window.SMX.zoom ? window.SMX.zoom.getHourLabelStep(state.hourWidth) : 1);
-    // Create header blocks that span across the step width so labels cover adjacent empty slots
+    // Create header blocks according to hourStep (already computed above)
     for (let h = 0; h < hours.length; ) {
       const span = Math.min(hourStep, hours.length - h);
       const div = document.createElement("div");
@@ -263,6 +275,48 @@
     rows.forEach(row => {
       const rowDiv = document.createElement("div");
       rowDiv.className = "timeline";
+      // Enable drop on rows to create events
+      rowDiv.addEventListener('dragover', (e) => {
+        if (!state.data) return;
+        const dt = e.dataTransfer;
+        if (!dt) return;
+        if (dt.types && (dt.types.includes('smx/new-event') || dt.types.includes('text/plain'))) {
+          e.preventDefault();
+          dt.dropEffect = 'copy';
+        }
+      });
+      rowDiv.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer; if (!dt) return;
+        const has = dt.types && (dt.types.includes('smx/new-event') || dt.types.includes('text/plain'));
+        if (!has) return;
+        e.preventDefault();
+        // Only create for person rows (ignore group-only drops)
+        if (row.type !== 'person') return;
+        const wrapperRect = container.getBoundingClientRect();
+        const x = e.clientX - wrapperRect.left; // relative to calendar container
+        // Convert x to minutes from start of visible range
+        const leftPx = Math.max(0, x - state.labelWidth);
+        const minutesFromStart = Math.max(0, Math.round((leftPx / state.hourWidth) * 60 / state.snapMinutes) * state.snapMinutes);
+        const startDate = data.startDate ? parseYMD(data.startDate) : new Date();
+        const startMid = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        const startTs = new Date(startMid.getTime() + minutesFromStart * 60000);
+        const defaultDurMin = Math.max(15, state.snapMinutes);
+        const endTs = new Date(startTs.getTime() + defaultDurMin * 60000);
+        const { ymd, pad2 } = window.SMX.date;
+        const ev = {
+          title: 'Neuer Termin',
+          start: `${ymd(startTs)}T${pad2(startTs.getHours())}:${pad2(startTs.getMinutes())}`,
+          end: `${ymd(endTs)}T${pad2(endTs.getHours())}:${pad2(endTs.getMinutes())}`,
+          attendees: [row.name],
+          color: window.SMX.colors.getGroupColorByName(row.group)
+        };
+        state.data.events.push(ev);
+        state.dirty = true;
+        try { window.dispatchEvent(new CustomEvent('smx:dirty-changed')); } catch(_) {}
+        loadCalendar();
+        // Optional: open editor immediately
+        try { if (typeof window.SMX.modals?.openEvModal === 'function') window.SMX.modals.openEvModal(state.data.events.length - 1); } catch(_) {}
+      });
       const label = document.createElement("div");
       label.className = row.type === "group" ? "label group" : "label";
       const groupNameForRow = row.type === "group" ? row.name : row.group;

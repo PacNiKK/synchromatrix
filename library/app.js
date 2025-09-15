@@ -264,7 +264,20 @@
     const evClose = document.getElementById("evModalClose");
     if (evClose) evClose.addEventListener("click", window.SMX.modals.closeEvModal);
     if (evModal) evModal.addEventListener("click", (e)=>{ if (e.target === evModal) window.SMX.modals.closeEvModal(); });
-    if (newEventBtn) newEventBtn.addEventListener("click", () => window.SMX.modals.openEvModal(-1));
+    if (newEventBtn) {
+      // Keep click behavior to open empty editor
+      newEventBtn.addEventListener("click", () => window.SMX.modals.openEvModal(-1));
+      // Enable drag-and-drop creation on timeline rows
+      newEventBtn.setAttribute('draggable', 'true');
+      newEventBtn.addEventListener('dragstart', (e) => {
+        const dt = e.dataTransfer; if (!dt) return;
+        try {
+          dt.effectAllowed = 'copy';
+          dt.setData('smx/new-event', '1');
+          dt.setData('text/plain', 'smx-new-event');
+        } catch(_) {}
+      });
+    }
     const naModal = document.getElementById("naModal");
     const naClose = document.getElementById("naModalClose");
     if (noAttBtn) noAttBtn.addEventListener("click", window.SMX.modals.openNaModal);

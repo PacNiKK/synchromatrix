@@ -15,6 +15,27 @@
   --btn-neutral: #616161;
   --btn-toggle: #239cff;
   --btn-toggle-side: flex-start;
+  --modal-bg: #ffffff;
+  --modal-border: #ddd;
+  --modal-header-bg: #f5f5f5;
+  --toolbar-bg: #fafafa;
+  --toolbar-border: #eee;
+  --card-bg: #fff;
+  --card-border: #eee;
+  --section-border: #eee;
+  --gm-drag-top: #1976d2;
+  --gm-drag-bottom: #1976d2;
+  --gm-drag-bg: #e3f2fd;
+  --gm-chip-border: #e0e0e0;
+  --gm-chip-bg: #f8f8f8;
+  /* Grid line colors */
+  --grid-hour: rgba(128,128,128,0.25);
+  --grid-minor: rgba(128,128,128,0.12);
+  --grid-day: rgba(128,128,128,0.35);
+  /* Unified control dimensions */
+  --btn-h: 34px;
+  --btn-px: 12px;
+  --btn-radius: 2px;
 }
 body { font-family: sans-serif; margin: 20px; background: var(--bg); color: var(--fg); }
 /* Dark mode */
@@ -33,6 +54,19 @@ body.dark {
   --btn-neutral: #757575;
   --btn-toggle: #333a4a;
   --btn-toggle-side: flex-end;
+  --modal-bg: #1e2230;
+  --modal-border: #333a4a;
+  --modal-header-bg: #262c3a;
+  --toolbar-bg: #171a21;
+  --toolbar-border: #30384a;
+  --card-bg: #1e2230;
+  --card-border: #333a4a;
+  --section-border: #30384a;
+  --gm-drag-top: #1e88e5;
+  --gm-drag-bottom: #1e88e5;
+  --gm-drag-bg: #233445;
+  --gm-chip-border: #333a4a;
+  --gm-chip-bg: #262c3a;
 }
 input[type="file"], input[type="range"], button { margin-bottom: 0px}
 #dirtyBadge { margin-bottom: 0; }
@@ -42,6 +76,69 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
   border: 1px solid var(--table-border);
 }
 #calendar { position: relative; }
+/* Background grid lines behind events; applied to data rows, not headers */
+#calendarWrapper.grid-h .timeline:not(.date-header):not(.header-row),
+#calendarWrapper.grid-30 .timeline:not(.date-header):not(.header-row),
+#calendarWrapper.grid-15 .timeline:not(.date-header):not(.header-row) {
+  background-repeat: repeat-x;
+  background-position: var(--label-size, 150px) 0;
+}
+/* Hour lines only + day boundary */
+#calendarWrapper.grid-h .timeline:not(.date-header):not(.header-row) {
+  background-image:
+    linear-gradient(to right, var(--grid-day) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-hour) 1px, transparent 1px);
+  background-size:
+    calc(var(--hour-width, 60px) * 24) 100%,
+    var(--hour-width, 60px) 100%;
+}
+/* Hour + 30-minute minor lines */
+#calendarWrapper.grid-30 .timeline:not(.date-header):not(.header-row) {
+  background-image:
+    linear-gradient(to right, var(--grid-day) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-hour) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-minor) 1px, transparent 1px);
+  background-size:
+    calc(var(--hour-width, 60px) * 24) 100%,
+    var(--hour-width, 60px) 100%,
+    calc(var(--hour-width, 60px) / 2) 100%;
+}
+/* Hour + 15-minute minor lines */
+#calendarWrapper.grid-15 .timeline:not(.date-header):not(.header-row) {
+  background-image:
+    linear-gradient(to right, var(--grid-day) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-hour) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-minor) 1px, transparent 1px);
+  background-size:
+    calc(var(--hour-width, 60px) * 24) 100%,
+    var(--hour-width, 60px) 100%,
+    calc(var(--hour-width, 60px) / 4) 100%;
+}
+/* Dynamic grid: day boundary, header division, and 4 subdivisions per header division */
+#calendarWrapper.grid-dyn .timeline:not(.date-header):not(.header-row) {
+  background-image:
+    linear-gradient(to right, var(--grid-day) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-hour) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-minor) 1px, transparent 1px);
+  background-size:
+    calc(var(--hour-width, 60px) * 24) 100%,
+    calc(var(--hour-width, 60px) * var(--header-step, 1)) 100%,
+    calc(var(--hour-width, 60px) * var(--header-step, 1) / 4) 100%;
+  background-position:
+    var(--label-size, 150px) 0,
+    var(--label-size, 150px) 0,
+    var(--label-size, 150px) 0;
+  background-repeat: repeat-x;
+}
+
+/* Ensure our composition works with prior specific classes by resetting custom props */
+#calendarWrapper.grid-h .timeline:not(.date-header):not(.header-row),
+#calendarWrapper.grid-30 .timeline:not(.date-header):not(.header-row),
+#calendarWrapper.grid-15 .timeline:not(.date-header):not(.header-row) {
+  /* Expose existing background as custom props so the dynamic layer can stack */
+  --_smx-existing-bg: inherit;
+  --_smx-existing-bg-size: inherit;
+}
 .timeline {
   display: grid;
   grid-template-columns: var(--label-size, 150px) repeat(var(--totalHours, 24), var(--hour-width, 60px));
@@ -84,14 +181,14 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
 .cell {
   border-right: 1px solid var(--table-border);
   border-bottom: 1px solid var(--row-border);
-  height: 40px;
+  height: 30px;
   position: relative;
 }
 .event {
   position: absolute;
   top: 4px;
   bottom: 4px;
-  border-radius: 4px;
+  border-radius: 2px;
   color: white;
   font-size: 12px;
   padding: 2px 4px;
@@ -132,23 +229,23 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
 /* Modal styles for Teilnehmer-Verwaltung */
 .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); z-index: 1000; }
 .modal.open { display: flex; }
-.modal .dialog { background: #fff; width: min(900px, 95vw); max-height: 90vh; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden; }
-.modal .dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #eee; background: #fafafa; }
+.modal .dialog { background: var(--modal-bg); width: min(900px, 95vw); max-height: 90vh; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); display: flex; flex-direction: column; overflow: hidden; }
+.modal .dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--modal-border); background: var(--modal-header-bg); }
 .modal .dialog header h3 { margin: 0; font-size: 16px; }
 .modal .dialog header button { border: none; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px; }
 .modal .dialog .body { padding: 12px 16px; overflow: auto; }
 .gm-toolbar { display: grid; gap: 10px; margin-bottom: 10px; }
-.gm-section { padding: 6px 0; border-top: 1px solid #eee; }
+.gm-section { padding: 6px 0; border-top: 1px solid var(--section-border); }
 .gm-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .gm-name { min-width: 160px; }
 .gm-header { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 6px; }
 .gm-header .gm-actions { display: flex; gap: 6px; }
-.gm-toolbar { background: #fafafa; border: 1px solid #eee; border-radius: 8px; padding: 10px; }
+.gm-toolbar { background: var(--toolbar-bg); border: 1px solid var(--toolbar-border); border-radius: 8px; padding: 10px; }
 .gm-toolbar input[type="text"] { padding: 6px 8px; }
 .gm-toolbar select, .gm-toolbar button { padding: 6px 8px; }
 .gm-toolbar .row { display: grid; grid-template-columns: 180px 1fr 1fr auto; align-items: center; gap: 8px; }
 .gm-toolbar .row input[type="text"], .gm-toolbar .row select { width: 100%; }
-.gm-card { border: 2px solid #eee; border-radius: 10px; padding: 10px; margin: 10px 0; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.gm-card { border: 2px solid var(--card-border); border-radius: 10px; padding: 10px; margin: 10px 0; background: var(--card-bg); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
 .gm-card .gm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .gm-card .gm-title { font-weight: 600; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 8px; }
 .gm-search { display: flex; gap: 8px; align-items: center; }
@@ -157,7 +254,7 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
 .gm-toolbar .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .gm-toolbar .section-title { font-weight: 600; margin-right: 6px; }
 .gm-people { display: flex; flex-direction: column; gap: 6px; }
-.gm-chip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #e0e0e0; border-radius: 10px; background: #f8f8f8; width: 100%; justify-content: space-between; min-height: 36px; }
+.gm-chip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--gm-chip-border); border-radius: 10px; background: var(--gm-chip-bg); width: 100%; justify-content: space-between; min-height: 36px; }
 .gm-chip .gm-chip-name { max-width: 60%; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; margin-left: 10px; }
 .gm-chip .gm-chip-actions { display: inline-flex; gap: 8px; margin-left: auto; align-items: center; }
 .gm-chip .gm-chip-actions select { height: 28px; line-height: normal; vertical-align: middle; }
@@ -166,9 +263,9 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
 /* Drag & Drop visuals for group manager */
 .gm-chip[draggable="true"] { cursor: grab; }
 .gm-chip.dragging { opacity: 0.6; }
-.gm-chip.drag-over-top { box-shadow: inset 0 3px 0 #2196f3; }
-.gm-chip.drag-over-bottom { box-shadow: inset 0 -3px 0 #2196f3; }
-.gm-card.gm-drop { border-color: #2196f3 !important; background: #f0f8ff; }
+.gm-chip.drag-over-top { box-shadow: inset 0 3px 0 var(--gm-drag-top); }
+.gm-chip.drag-over-bottom { box-shadow: inset 0 -3px 0 var(--gm-drag-bottom); }
+.gm-card.gm-drop { border-color: #2196f3 !important; background: var(--gm-drag-bg); }
 /* Event editor */
 .ev-dt { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; grid-column: 1 / span 2; }
 .ev-dt .ev-block { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #eee; border-radius: 8px; background: #fafafa; }
@@ -178,7 +275,7 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
 .na-list { display: grid; grid-template-columns: 1fr 140px 140px auto; gap: 8px 12px; align-items: center; }
 .na-list > div { padding: var(--cell-padding); border-bottom: 1px solid var(--row-border); }
 .na-head { font-weight: 600; color: #444; background: var(--table-header-bg); border-bottom: 1px solid var(--table-border); text-align: center; }
-.na-pill { display: inline-block; width: 12px; height: 12px; border-radius: 999px; border: 1px solid #ccc; margin-right: 6px; vertical-align: middle; }
+.na-pill { display: inline-block; width: 12px; height: 12px; border-radius: 2px; border: 1px solid #ccc; margin-right: 6px; vertical-align: middle; }
 .na-row { display: contents; }
 /* Collapsible Top Menu */
 .topbar { display: flex; justify-content: flex-start; align-items: center; gap: 10px; margin: 6px 0 10px; }
@@ -190,28 +287,77 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
 .menu-panel.open { max-height: 400px; opacity: 1; padding: 10px 12px; }
 .menu-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
 .quick-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
-.icon-label {filter:grayscale(100%); display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; font-size: 18px; }
-.icon-btn { width: 34px; height: 34px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; padding: 0; font-size: 18px; box-sizing: border-box; }
+.icon-label {display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; font-size: 18px; }
+.icon-btn { width: var(--btn-h); height: var(--btn-h); line-height: 1; display: inline-flex; align-items: center; justify-content: center; padding: 0; font-size: 18px; box-sizing: border-box; }
 
 /* Ensure modal header close buttons match icon button sizing */
 .modal .dialog header button.btn.icon-btn { padding: 0; font-size: 18px; width: 34px; height: 34px; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Now toggle pill label */
-.switch-label { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; border: 1px solid transparent; cursor: pointer; user-select: none; }
+.switch-label { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 2px; border: 1px solid transparent; cursor: pointer; user-select: none; }
 .switch-label:hover { background: var(--table-header-bg); }
 .switch-label input[type="checkbox"] { accent-color: var(--btn-primary); width: 16px; height: 16px; }
 
-/* Buttons */
-.btn { border: none; border-radius: 999px; padding: 8px 12px; color: var(--btn-fg); background: var(--btn-neutral); cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.12); transition: transform 80ms ease, filter 120ms ease, background 120ms ease; }
-.btn:hover { filter: brightness(1.05); }
-.btn:active { transform: translateY(1px); }
-.btn:disabled {filter:grayscale(100%); opacity: 0.6; cursor: not-allowed; }
+/* Unified controls: buttons and toggles */
+.btn, .menu-icon, .switch-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: var(--btn-h);
+  padding: 0 var(--btn-px);
+  border-radius: var(--btn-radius);
+  border: 1px solid transparent;
+  background: var(--btn-neutral);
+  color: var(--btn-fg);
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+  cursor: pointer;
+  transition: transform 80ms ease, filter 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.btn:hover, .menu-icon:hover, .switch-label:hover { filter: brightness(1.05); }
+.btn:active, .menu-icon:active, .switch-label:active { transform: translateY(1px); }
+.btn:focus-visible, .menu-icon:focus-visible, .switch-label:focus-within {
+  outline: 0 solid transparent;
+  box-shadow: 0 0 0 3px rgba(25,118,210,0.35);
+}
+.btn[disabled], .menu-icon[disabled], .switch-label[aria-disabled="true"] {
+  filter: grayscale(100%);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Variants (apply to .btn only) */
 .btn.primary { background: var(--btn-primary); }
 .btn.success { background: var(--btn-success); }
 .btn.warning { background: var(--btn-warning); }
 .btn.neutral { background: var(--btn-neutral); }
-.btn.menu-toggle { width: 60px; height: 34px; padding: 4px; font-size: 18px; display: inline-flex; align-items: center; justify-content: var(--btn-toggle-side); background: var(--btn-toggle)}
+
+/* Icon-sized buttons share the same square size */
+.btn.icon-btn, .icon-btn, .menu-icon {
+  width: var(--btn-h);
+  min-width: var(--btn-h);
+  height: var(--btn-h);
+  padding: 0;
+  font-size: 18px;
+}
+
+/* Menu toggle button keeps its special alignment but uses unified base */
+.btn.menu-toggle {
+  width: 60px;
+  justify-content: var(--btn-toggle-side);
+  background: var(--btn-toggle);
+}
+
+/* Switch label aligns with unified control visuals */
+.switch-label {
+  border: 1px solid transparent;
+}
+.switch-label input[type="checkbox"] {
+  accent-color: var(--btn-primary);
+  width: 16px; height: 16px;
+}
 
 .slider {
   appearance: none;
@@ -272,4 +418,12 @@ input[type="file"], input[type="range"], button { margin-bottom: 0px}
   border: 1px solid #f5c2c7;
   padding: 2px 8px;
   border-radius: 999px;
+}
+
+/* Hide static cell borders when dynamic gridlines are active */
+#calendarWrapper.grid-h .cell,
+#calendarWrapper.grid-30 .cell,
+#calendarWrapper.grid-15 .cell,
+#calendarWrapper.grid-dyn .cell {
+  border-right-color: transparent;
 }
